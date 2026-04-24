@@ -281,39 +281,43 @@ const Schedule = () => {
         )}
       </div>
 
-      {/* Top Section: Map + Search/Storage Split (Stacked on Mobile) */}
-      <div className="split-layout">
-        {/* Left Half: Map */}
-        <div style={{ flex: 1, position: 'relative', borderRight: '1px solid var(--color-border)' }}>
-          <Map 
-            storageMarkers={storageAndOtherMarkers} 
-            routeMarkers={routeMarkers} 
-            onRouteOptimized={handleRouteOptimized}
-            onRouteCalculated={handleRouteCalculated}
-            height="100%"
-          />
-        </div>
+      {/* Top Section: Full Width Map */}
+      <div style={{ height: '45vh', borderBottom: '1px solid var(--color-border)', position: 'relative' }}>
+        <Map 
+          storageMarkers={storageAndOtherMarkers} 
+          routeMarkers={routeMarkers} 
+          onRouteOptimized={handleRouteOptimized}
+          onRouteCalculated={handleRouteCalculated}
+          height="100%"
+        />
+      </div>
 
-        {/* Right Half: Search & Storage */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', overflowY: 'auto' }}>
+      {/* Bottom Section: Split Storage & Timeline */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }} className="split-layout">
+        
+        {/* Left Column: Search & Storage */}
+        <div style={{ 
+          flex: 1, borderRight: '1px solid var(--color-border)', 
+          padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' 
+        }}>
           <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolder.items} />
           
-          <div style={{ marginTop: '8px' }}>
-            <h2 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0, color: 'var(--color-text)', fontWeight: 'bold' }}>
+          <div style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ fontSize: '18px', marginBottom: '12px', marginTop: 0, color: 'var(--color-text)', fontWeight: 'bold' }}>
               🗂️ 보관함
             </h2>
             
             {/* Storage Category Filter Chips */}
-            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '15px', overflowX: 'auto', paddingBottom: '4px' }}>
               {['전체', '관광명소', '맛집', '카페', '숙소', '기타'].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setStorageCategory(cat)}
                   style={{
-                    padding: '6px 12px', borderRadius: '15px', border: '1px solid var(--color-border)',
+                    padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--color-border)',
                     background: storageCategory === cat ? 'var(--color-point)' : 'white',
                     color: storageCategory === cat ? 'white' : 'var(--color-text-light)',
-                    fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s'
+                    fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s'
                   }}
                 >
                   {cat}
@@ -321,96 +325,95 @@ const Schedule = () => {
               ))}
             </div>
 
-            <SortableTimeline 
-              listId={storageCategory === '전체' ? "보관함" : `보관함 (${storageCategory})`}
-              items={storageCategory === '전체' ? activeFolder.items : activeFolder.items.filter(item => (item.category || '기타') === storageCategory)} 
-              setItems={handleActiveFolderItemsChange} 
-              groupName="schedule" 
-              onDelete={handleDeletePlace}
-              isCloneable={true}
-              scheduledPlaceIds={activeFolder.days.flatMap(day => day.items.map(item => item.googlePlaceId || item.name))}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Section: Full Width Timeline */}
-      <div style={{ 
-        flex: 1, padding: '20px', overflow: 'hidden',
-        display: 'flex', flexDirection: 'column',
-        background: 'var(--color-bg)'
-      }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-          
-          {/* Day Tabs Navigation */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap' }}>
-            <div style={{ fontWeight: 'bold', marginRight: '10px', fontSize: '15px', color: 'var(--color-text)' }}>🗓️ 일자별 일정:</div>
-            {activeFolder.days.map((day, index) => (
-              <button
-                key={day.id}
-                onClick={() => setRoutedDayIndex(index)}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (routedDayIndex !== index) setRoutedDayIndex(index);
-                }}
-                style={{
-                  padding: '10px 24px',
-                  borderRadius: '30px',
-                  border: 'none',
-                  background: index === routedDayIndex ? 'var(--color-point)' : 'var(--color-bg)',
-                  color: index === routedDayIndex ? 'white' : 'var(--color-text)',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  transition: 'all 0.2s',
-                  boxShadow: index === routedDayIndex ? '0 4px 12px rgba(0,0,0,0.12)' : 'none'
-                }}
-              >
-                {day.title}
-              </button>
-            ))}
-            <button 
-              onClick={handleAddDay}
-              style={{
-                padding: '10px 18px', borderRadius: '30px', border: '1px dashed var(--color-border)',
-                background: 'transparent', color: 'var(--color-text-light)', cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              + Day 추가
-            </button>
-          </div>
-
-          {/* Active Day Content */}
-          {activeFolder.days[routedDayIndex] && (
-            <div style={{ flex: 1, overflowY: 'auto', paddingTop: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-                <h2 style={{ fontSize: '22px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
-                  📍 {activeFolder.days[routedDayIndex].title} 여행 경로
-                </h2>
-                <button 
-                  onClick={() => handleDeleteDay(activeFolder.days[routedDayIndex].id)}
-                  style={{
-                    padding: '6px 14px', borderRadius: '8px', fontSize: '13px', border: '1px solid #ff4d4f',
-                    background: 'white', color: '#ff4d4f', cursor: 'pointer', transition: 'all 0.2s'
-                  }}
-                  onMouseOver={(e) => { e.target.style.background = '#fff1f0'; }}
-                  onMouseOut={(e) => { e.target.style.background = 'white'; }}
-                >
-                  Day 삭제
-                </button>
-              </div>
-              
+            <div style={{ flex: 1, overflowY: 'auto' }}>
               <SortableTimeline 
-                listId={activeFolder.days[routedDayIndex].title} 
-                items={activeFolder.days[routedDayIndex].items} 
-                setItems={(newItems) => handleDayItemsChange(activeFolder.days[routedDayIndex].id, newItems)} 
+                listId={storageCategory === '전체' ? "보관함" : `보관함 (${storageCategory})`}
+                items={storageCategory === '전체' ? activeFolder.items : activeFolder.items.filter(item => (item.category || '기타') === storageCategory)} 
+                setItems={handleActiveFolderItemsChange} 
                 groupName="schedule" 
                 onDelete={handleDeletePlace}
-                routeLegs={routeLegs}
+                isCloneable={true}
+                scheduledPlaceIds={activeFolder.days.flatMap(day => day.items.map(item => item.googlePlaceId || item.name))}
               />
             </div>
-          )}
+          </div>
+        </div>
+        {/* Right Column: Timeline */}
+        <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Day Tabs Navigation */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
+              <div style={{ fontWeight: 'bold', marginRight: '10px', fontSize: '15px', color: 'var(--color-text)' }}>🗓️ 일자별 일정:</div>
+              {activeFolder.days.map((day, index) => (
+                <button
+                  key={day.id}
+                  onClick={() => setRoutedDayIndex(index)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (routedDayIndex !== index) setRoutedDayIndex(index);
+                  }}
+                  style={{
+                    padding: '10px 24px',
+                    borderRadius: '30px',
+                    border: 'none',
+                    background: index === routedDayIndex ? 'var(--color-point)' : 'var(--color-bg)',
+                    color: index === routedDayIndex ? 'white' : 'var(--color-text)',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '15px',
+                    transition: 'all 0.2s',
+                    boxShadow: index === routedDayIndex ? '0 4px 12px rgba(0,0,0,0.12)' : 'none'
+                  }}
+                >
+                  {day.title}
+                </button>
+              ))}
+              <button 
+                onClick={handleAddDay}
+                style={{
+                  padding: '10px 18px', borderRadius: '30px', border: '1px dashed var(--color-border)',
+                  background: 'transparent', color: 'var(--color-text-light)', cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                + Day 추가
+              </button>
+            </div>
+
+            {/* Active Day Content */}
+            {activeFolder.days[routedDayIndex] && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                  <h2 style={{ fontSize: '22px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
+                    📍 {activeFolder.days[routedDayIndex].title} 여행 경로
+                  </h2>
+                  <button 
+                    onClick={() => handleDeleteDay(activeFolder.days[routedDayIndex].id)}
+                    style={{
+                      padding: '6px 14px', borderRadius: '8px', fontSize: '13px', border: '1px solid #ff4d4f',
+                      background: 'white', color: '#ff4d4f', cursor: 'pointer', transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => { e.target.style.background = '#fff1f0'; }}
+                    onMouseOut={(e) => { e.target.style.background = 'white'; }}
+                  >
+                    Day 삭제
+                  </button>
+                </div>
+
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  <SortableTimeline 
+                    listId={activeFolder.days[routedDayIndex].title}
+                    items={activeFolder.days[routedDayIndex].items} 
+                    setItems={(newItems) => handleDayItemsChange(activeFolder.days[routedDayIndex].id, newItems)} 
+                    groupName="schedule" 
+                    onDelete={handleDeletePlace}
+                    routeLegs={routeLegs}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
