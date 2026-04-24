@@ -145,31 +145,75 @@ h2 {
   color: var(--color-text);
 }
 
-/* Responsive Layout */
-.split-layout {
-  display: flex;
-  height: 30vh;
-  min-height: 280px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-card);
-}
-
+/* Responsive: mobile vertical layout for the Schedule page */
 @media (max-width: 768px) {
-  .split-layout {
-    flex-direction: column;
-    height: auto;
-    min-height: unset;
-  }
-  
-  .split-layout > div {
-    width: 100% !important;
-    height: 250px !important;
-    border-right: none !important;
-    border-bottom: 1px solid var(--color-border);
+  /* Let the page scroll vertically on mobile; desktop keeps overflow: hidden */
+  .page-container {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
 
-  .page-container {
-    padding-bottom: 80px;
+  /* Schedule page should grow with its content instead of being clipped to 100vh */
+  .schedule-page {
+    height: auto !important;
+    min-height: 100%;
+  }
+
+  /* Flatten the desktop 50/50 split into a single vertical column */
+  .schedule-main {
+    flex-direction: column !important;
+    overflow: visible !important;
+  }
+
+  /* Promote the children of both columns to direct flex items of .schedule-main
+     so we can reorder them: map → storage → timeline */
+  .schedule-col-left,
+  .schedule-col-right {
+    display: contents !important;
+  }
+
+  .schedule-map {
+    order: 1;
+    flex: 0 0 auto !important;
+    height: 45vh !important;
+    min-height: 280px;
+    border-right: none !important;
+    border-bottom: 1px solid var(--color-border) !important;
+  }
+
+  .schedule-search {
+    order: 2;
+    padding: 0 12px;
+  }
+
+  .schedule-storage {
+    order: 3;
+    flex: 0 0 auto !important;
+    margin: 0 12px;
+    overflow: visible !important;
+    padding: 16px !important;
+  }
+
+  .schedule-timeline-wrap {
+    order: 4;
+    flex: 0 0 auto !important;
+    overflow: visible !important;
+    padding: 12px !important;
+    border-right: none !important;
+  }
+
+  /* The inner cards/lists of storage and timeline use overflow: hidden and
+     flex:1 on desktop to lock them into 50/50 panes. On mobile we let them
+     grow with their content so nothing is clipped. The filter chip bar and
+     day tab bar keep their own horizontal scrolling. */
+  .schedule-storage,
+  .schedule-storage-list,
+  .schedule-timeline-card,
+  .schedule-timeline-day,
+  .schedule-timeline-list {
+    overflow: visible !important;
+    flex: 0 0 auto !important;
   }
 }
 
