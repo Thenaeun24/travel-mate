@@ -27,14 +27,18 @@ const toArray = (val) => {
 
 const normalizeFolders = (data) => {
   const list = toArray(data);
-  return list.filter(Boolean).map(folder => ({
-    ...folder,
-    items: toArray(folder.items),
-    days: toArray(folder.days).map(day => ({
-      ...day,
-      items: toArray(day.items)
-    }))
-  }));
+  return list
+    .filter(folder => folder && typeof folder === 'object')
+    .map(folder => ({
+      ...folder,
+      items: toArray(folder.items).filter(item => item && typeof item === 'object'),
+      days: toArray(folder.days)
+        .filter(day => day && typeof day === 'object')
+        .map(day => ({
+          ...day,
+          items: toArray(day.items).filter(item => item && typeof item === 'object')
+        }))
+    }));
 };
 
 const getInitialFolders = () => {
