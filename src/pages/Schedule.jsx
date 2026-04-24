@@ -254,8 +254,8 @@ const Schedule = () => {
     setRouteLegs(legs);
   };
 
-  const activeFolderDays = activeFolderDays || [];
-  const activeFolderItems = activeFolderItems || [];
+  const activeFolderDays = activeFolder.days || [];
+  const activeFolderItems = activeFolder.items || [];
   const routeMarkers = activeFolderDays[routedDayIndex]?.items || [];
   const routePlaceIds = new Set(routeMarkers.map(m => m.googlePlaceId || m.name));
 
