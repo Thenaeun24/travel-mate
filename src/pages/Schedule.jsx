@@ -3,6 +3,8 @@ import { ReactSortable } from 'react-sortablejs';
 import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
 import PlaceSearch from '../components/PlaceSearch';
+import { db } from '../firebase';
+import { ref, onValue, set } from 'firebase/database';
 
 const initialFolder = {
   id: 'f1',
@@ -32,9 +34,28 @@ const Schedule = () => {
   const [routedDayIndex, setRoutedDayIndex] = useState(0); 
   const [routeLegs, setRouteLegs] = useState([]); // travel time between places
 
+  const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
+
+  // Firebase Sync: Load data on mount
   React.useEffect(() => {
+    const foldersRef = ref(db, 'travel-mate-app/folders');
+    const unsubscribe = onValue(foldersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setFolders(data);
+      }
+      setIsFirebaseLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firebase Sync: Save data on change
+  React.useEffect(() => {
+    if (isFirebaseLoading) return; // Don't sync back initial load or while loading
+    const foldersRef = ref(db, 'travel-mate-app/folders');
+    set(foldersRef, folders);
     localStorage.setItem('visitor_tool_folders', JSON.stringify(folders));
-  }, [folders]);
+  }, [folders, isFirebaseLoading]);
 
   // Ensure active folder exists, fallback to first folder
   const activeFolder = folders.find(f => f.id === activeFolderId) || folders[0];
