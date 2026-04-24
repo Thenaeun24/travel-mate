@@ -203,6 +203,84 @@ const Schedule = () => {
   ].filter(m => !routePlaceIds.has(m.googlePlaceId || m.name));
 
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* Country/Folder Menu Bar */}
+      <div className="flex-row" style={{ 
+        padding: '12px 16px', 
+        background: 'var(--color-card)', 
+        borderBottom: '1px solid var(--color-border)',
+        overflowX: 'auto', 
+        whiteSpace: 'nowrap', 
+        gap: '8px'
+      }}>
+        <div style={{ fontWeight: 'bold', marginRight: '8px', color: 'var(--color-point)' }}>✈️ 여행지:</div>
+        <ReactSortable 
+          list={folders} 
+          setList={setFolders} 
+          animation={150} 
+          style={{ display: 'flex', gap: '8px' }}
+        >
+          {folders.map(f => (
+            <div key={f.id} style={{ position: 'relative', display: 'inline-block' }}>
+              <button 
+                onClick={() => setActiveFolderId(f.id)}
+                style={{
+                  padding: '8px 16px', borderRadius: '20px', border: 'none',
+                  background: f.id === activeFolderId ? 'var(--color-point)' : 'var(--color-bg)',
+                  color: f.id === activeFolderId ? 'white' : 'var(--color-text)',
+                  fontWeight: f.id === activeFolderId ? 'bold' : 'normal',
+                  cursor: 'pointer', transition: 'background 0.2s',
+                  boxShadow: f.id === activeFolderId ? '0 2px 4px rgba(0,0,0,0.1)' : 'none'
+                }}
+              >
+                {f.name}
+              </button>
+              {folders.length > 1 && (
+                <button 
+                  onClick={(e) => handleDeleteFolder(f.id, e)} 
+                  style={{
+                    position: 'absolute', top: '-4px', right: '-4px', 
+                    background: '#ff4d4f', color: 'white', borderRadius: '50%', 
+                    width: '16px', height: '16px', fontSize: '10px', border: 'none', 
+                    cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center'
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+        </ReactSortable>
+        {isAddingFolder ? (
+          <div className="flex-row" style={{ gap: '4px' }}>
+            <input 
+              type="text" 
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="새 여행지 입력..."
+              style={{ padding: '8px 12px', borderRadius: '20px', border: '1px solid var(--color-border)', outline: 'none', width: '130px' }}
+              onKeyDown={(e) => {
+                if(e.nativeEvent.isComposing) return;
+                if(e.key === 'Enter') handleAddFolder();
+              }}
+              autoFocus
+            />
+            <button onClick={handleAddFolder} style={{ background: 'var(--cat-cafe)', color: 'var(--color-text)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontWeight: 'bold' }}>✓</button>
+            <button onClick={() => setIsAddingFolder(false)} style={{ background: 'var(--color-border)', color: 'var(--color-text-light)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer' }}>✕</button>
+          </div>
+        ) : (
+          <button 
+            onClick={() => setIsAddingFolder(true)}
+            style={{
+              padding: '8px 16px', borderRadius: '20px', border: '1px dashed var(--color-border)',
+              background: 'transparent', color: 'var(--color-text-light)', cursor: 'pointer'
+            }}
+          >
+            + 추가
+          </button>
+        )}
+      </div>
+
       {/* Main Container: 50/50 Left-Right Split */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }}>
         
