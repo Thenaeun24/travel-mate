@@ -261,14 +261,14 @@ const Schedule = () => {
   ].filter(m => !routePlaceIds.has(m.googlePlaceId || m.name));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div className="schedule-page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* Country/Folder Menu Bar */}
-      <div className="flex-row" style={{ 
-        padding: '12px 16px', 
-        background: 'var(--color-card)', 
+      <div className="flex-row schedule-folder-bar" style={{
+        padding: '12px 16px',
+        background: 'var(--color-card)',
         borderBottom: '1px solid var(--color-border)',
-        overflowX: 'auto', 
-        whiteSpace: 'nowrap', 
+        overflowX: 'auto',
+        whiteSpace: 'nowrap',
         gap: '8px'
       }}>
         <div style={{ fontWeight: 'bold', marginRight: '8px', color: 'var(--color-point)' }}>✈️ 여행지:</div>
@@ -340,16 +340,16 @@ const Schedule = () => {
       </div>
 
       {/* Main Container: 50/50 Left-Right Split */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }}>
-        
+      <div className="schedule-main" style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }}>
+
         {/* LEFT COLUMN (50%): Map (Top) + Schedule (Bottom) */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)' }}>
-          
+        <div className="schedule-col-left" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)' }}>
+
           {/* Top-Left: Google Map (50% Height) */}
-          <div style={{ flex: 1, position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
-            <Map 
-              storageMarkers={storageAndOtherMarkers} 
-              routeMarkers={routeMarkers} 
+          <div className="schedule-map" style={{ flex: 1, position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
+            <Map
+              storageMarkers={storageAndOtherMarkers}
+              routeMarkers={routeMarkers}
               onRouteOptimized={handleRouteOptimized}
               onRouteCalculated={handleRouteCalculated}
               height="100%"
@@ -357,8 +357,8 @@ const Schedule = () => {
           </div>
 
           {/* Bottom-Left: Schedule Timeline (50% Height) */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
-            <div style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="schedule-timeline-wrap" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
+            <div className="schedule-timeline-card" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               
               {/* Day Tabs Navigation */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
@@ -401,7 +401,7 @@ const Schedule = () => {
 
               {/* Active Day Content */}
               {activeFolderDays[routedDayIndex] && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="schedule-timeline-day" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                     <h2 style={{ fontSize: '20px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
                       📍 {activeFolderDays[routedDayIndex].title}
@@ -417,12 +417,12 @@ const Schedule = () => {
                     </button>
                   </div>
 
-                  <div style={{ flex: 1, overflowY: 'auto' }}>
-                    <SortableTimeline 
+                  <div className="schedule-timeline-list" style={{ flex: 1, overflowY: 'auto' }}>
+                    <SortableTimeline
                       listId={activeFolderDays[routedDayIndex].title}
-                      items={activeFolderDays[routedDayIndex].items} 
-                      setItems={(newItems) => handleDayItemsChange(activeFolderDays[routedDayIndex].id, newItems)} 
-                      groupName="schedule" 
+                      items={activeFolderDays[routedDayIndex].items}
+                      setItems={(newItems) => handleDayItemsChange(activeFolderDays[routedDayIndex].id, newItems)}
+                      groupName="schedule"
                       onDelete={handleDeletePlace}
                       routeLegs={routeLegs}
                     />
@@ -434,10 +434,12 @@ const Schedule = () => {
         </div>
 
         {/* RIGHT COLUMN (50%): Search & Storage (Full Height) */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', overflowY: 'auto' }}>
-          <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolderItems} />
-          
-          <div style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="schedule-col-right" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', overflowY: 'auto' }}>
+          <div className="schedule-search">
+            <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolderItems} />
+          </div>
+
+          <div className="schedule-storage" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <h2 style={{ fontSize: '20px', marginBottom: '15px', marginTop: 0, color: 'var(--color-text)', fontWeight: 'bold' }}>
               🗂️ 보관함
             </h2>
@@ -460,12 +462,12 @@ const Schedule = () => {
               ))}
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              <SortableTimeline 
+            <div className="schedule-storage-list" style={{ flex: 1, overflowY: 'auto' }}>
+              <SortableTimeline
                 listId={storageCategory === '전체' ? "보관함" : `보관함 (${storageCategory})`}
-                items={storageCategory === '전체' ? activeFolderItems : activeFolderItems.filter(item => (item.category || '기타') === storageCategory)} 
-                setItems={handleActiveFolderItemsChange} 
-                groupName="schedule" 
+                items={storageCategory === '전체' ? activeFolderItems : activeFolderItems.filter(item => (item.category || '기타') === storageCategory)}
+                setItems={handleActiveFolderItemsChange}
+                groupName="schedule"
                 onDelete={handleDeletePlace}
                 isCloneable={true}
                 scheduledPlaceIds={activeFolderDays.flatMap(day => (day.items || []).map(item => item.googlePlaceId || item.name))}
