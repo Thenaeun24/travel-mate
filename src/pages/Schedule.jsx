@@ -33,6 +33,7 @@ const Schedule = () => {
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [routedDayIndex, setRoutedDayIndex] = useState(0); 
   const [routeLegs, setRouteLegs] = useState([]); // travel time between places
+  const [storageCategory, setStorageCategory] = useState('전체');
 
   const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
 
@@ -94,7 +95,14 @@ const Schedule = () => {
   const handleActiveFolderItemsChange = (newItems) => {
     setFolders(prev => prev.map(folder => {
       if (folder.id === activeFolderId) {
-        return { ...folder, items: newItems };
+        if (storageCategory === '전체') {
+          return { ...folder, items: newItems };
+        } else {
+          // Merge the newly ordered/added filtered items back into the original list
+          // keeping items from other categories in their original relative positions
+          const otherItems = folder.items.filter(item => (item.category || '기타') !== storageCategory);
+          return { ...folder, items: [...otherItems, ...newItems] };
+        }
       }
       return folder;
     }));
@@ -294,9 +302,28 @@ const Schedule = () => {
             <h2 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0, color: 'var(--color-text)', fontWeight: 'bold' }}>
               🗂️ 보관함
             </h2>
+            
+            {/* Storage Category Filter Chips */}
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {['전체', '관광명소', '맛집', '카페', '숙소', '기타'].map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setStorageCategory(cat)}
+                  style={{
+                    padding: '6px 12px', borderRadius: '15px', border: '1px solid var(--color-border)',
+                    background: storageCategory === cat ? 'var(--color-point)' : 'white',
+                    color: storageCategory === cat ? 'white' : 'var(--color-text-light)',
+                    fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s'
+                  }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
             <SortableTimeline 
-              listId="보관함"
-              items={activeFolder.items} 
+              listId={storageCategory === '전체' ? "보관함" : `보관함 (${storageCategory})`}
+              items={storageCategory === '전체' ? activeFolder.items : activeFolder.items.filter(item => (item.category || '기타') === storageCategory)} 
               setItems={handleActiveFolderItemsChange} 
               groupName="schedule" 
               onDelete={handleDeletePlace}
