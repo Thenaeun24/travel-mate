@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ReactSortable } from 'react-sortablejs';
 import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
@@ -16,26 +16,63 @@ const initialFolder = {
   ]
 };
 
+// Firebase RTDB strips empty arrays and may return arrays as keyed objects
+// (e.g. {"0": ..., "1": ...}). Normalize everything back to arrays with the
+// required shape so the rest of the UI can rely on .map/.filter/.find.
+const toArray = (val) => {
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === 'object') return Object.values(val);
+  return [];
+};
+
+const normalizeFolders = (data) => {
+  const list = toArray(data);
+  return list.filter(Boolean).map(folder => ({
+    ...folder,
+    items: toArray(folder.items),
+    days: toArray(folder.days).map(day => ({
+      ...day,
+      items: toArray(day.items)
+    }))
+  }));
+};
+
 const getInitialFolders = () => {
   try {
     const saved = localStorage.getItem('visitor_tool_folders');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = normalizeFolders(JSON.parse(saved));
+      if (parsed.length) return parsed;
+    }
   } catch (e) {
     console.error(e);
   }
   return [initialFolder];
 };
 
+const getInitialActiveFolderId = (folders) => {
+  try {
+    const saved = localStorage.getItem('visitor_tool_active_folder');
+    if (saved && folders.some(f => f.id === saved)) return saved;
+  } catch (e) {
+    console.error(e);
+  }
+  return folders[0]?.id;
+};
+
 const Schedule = () => {
   const [folders, setFolders] = useState(getInitialFolders);
-  const [activeFolderId, setActiveFolderId] = useState('f1');
+  const [activeFolderId, setActiveFolderId] = useState(() => getInitialActiveFolderId(getInitialFolders()));
   const [newFolderName, setNewFolderName] = useState('');
   const [isAddingFolder, setIsAddingFolder] = useState(false);
-  const [routedDayIndex, setRoutedDayIndex] = useState(0); 
+  const [routedDayIndex, setRoutedDayIndex] = useState(0);
   const [routeLegs, setRouteLegs] = useState([]); // travel time between places
   const [storageCategory, setStorageCategory] = useState('전체');
 
   const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
+  // Track the last snapshot applied from Firebase so we can suppress the
+  // write-echo loop (set → onValue → setFolders → set → ...).
+  const lastRemoteSnapshotRef = useRef(null);
 
   // Firebase Sync: Load data on mount
   React.useEffect(() => {
@@ -43,7 +80,12 @@ const Schedule = () => {
     const unsubscribe = onValue(foldersRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        setFolders(data);
+        const normalized = normalizeFolders(data);
+        if (normalized.length) {
+          const serialized = JSON.stringify(normalized);
+          lastRemoteSnapshotRef.current = serialized;
+          setFolders(normalized);
+        }
       }
       setIsFirebaseLoading(false);
     });
@@ -53,13 +95,24 @@ const Schedule = () => {
   // Firebase Sync: Save data on change
   React.useEffect(() => {
     if (isFirebaseLoading) return; // Don't sync back initial load or while loading
+    const serialized = JSON.stringify(folders);
+    // Skip writes that just echo what we just received from the server.
+    if (serialized === lastRemoteSnapshotRef.current) return;
+    lastRemoteSnapshotRef.current = serialized;
     const foldersRef = ref(db, 'travel-mate-app/folders');
     set(foldersRef, folders);
-    localStorage.setItem('visitor_tool_folders', JSON.stringify(folders));
+    localStorage.setItem('visitor_tool_folders', serialized);
   }, [folders, isFirebaseLoading]);
 
-  // Ensure active folder exists, fallback to first folder
-  const activeFolder = folders.find(f => f.id === activeFolderId) || folders[0];
+  // Persist the selected folder across refreshes.
+  React.useEffect(() => {
+    if (activeFolderId) {
+      localStorage.setItem('visitor_tool_active_folder', activeFolderId);
+    }
+  }, [activeFolderId]);
+
+  // Ensure active folder exists, fallback to first folder (or the default empty one)
+  const activeFolder = folders.find(f => f.id === activeFolderId) || folders[0] || initialFolder;
   
   // Update activeFolderId if the current one was deleted
   React.useEffect(() => {
@@ -73,8 +126,9 @@ const Schedule = () => {
   const handleAddPlace = (newPlace) => {
     setFolders(prev => prev.map(folder => {
       if (folder.id === activeFolderId) {
-        if (!folder.items.find(item => item.id === newPlace.id)) {
-          return { ...folder, items: [newPlace, ...folder.items] };
+        const items = folder.items || [];
+        if (!items.find(item => item.id === newPlace.id)) {
+          return { ...folder, items: [newPlace, ...items] };
         }
       }
       return folder;
@@ -84,10 +138,10 @@ const Schedule = () => {
   const handleDeletePlace = (placeId) => {
     setFolders(prev => prev.map(folder => ({
       ...folder,
-      items: folder.items.filter(item => item.id !== placeId),
-      days: folder.days.map(day => ({
+      items: (folder.items || []).filter(item => item.id !== placeId),
+      days: (folder.days || []).map(day => ({
         ...day,
-        items: day.items.filter(item => item.id !== placeId)
+        items: (day.items || []).filter(item => item.id !== placeId)
       }))
     })));
   };
@@ -100,7 +154,7 @@ const Schedule = () => {
         } else {
           // Merge the newly ordered/added filtered items back into the original list
           // keeping items from other categories in their original relative positions
-          const otherItems = folder.items.filter(item => (item.category || '기타') !== storageCategory);
+          const otherItems = (folder.items || []).filter(item => (item.category || '기타') !== storageCategory);
           return { ...folder, items: [...otherItems, ...newItems] };
         }
       }
@@ -113,7 +167,7 @@ const Schedule = () => {
       if (folder.id === activeFolderId) {
         return {
           ...folder,
-          days: folder.days.map(day => day.id === dayId ? { ...day, items: newItems } : day)
+          days: (folder.days || []).map(day => day.id === dayId ? { ...day, items: newItems } : day)
         };
       }
       return folder;
@@ -151,10 +205,11 @@ const Schedule = () => {
   const handleAddDay = () => {
     setFolders(prev => prev.map(folder => {
       if (folder.id === activeFolderId) {
-        const nextNum = folder.days.length + 1;
+        const days = folder.days || [];
+        const nextNum = days.length + 1;
         return {
           ...folder,
-          days: [...folder.days, { id: 'day' + Date.now(), title: `Day ${nextNum}`, items: [] }]
+          days: [...days, { id: 'day' + Date.now(), title: `Day ${nextNum}`, items: [] }]
         };
       }
       return folder;
@@ -166,7 +221,7 @@ const Schedule = () => {
       if (folder.id === activeFolderId) {
         return {
           ...folder,
-          days: folder.days.filter(d => d.id !== dayId)
+          days: (folder.days || []).filter(d => d.id !== dayId)
         };
       }
       return folder;
@@ -174,16 +229,17 @@ const Schedule = () => {
   };
 
   const handleRouteOptimized = (optimizedOrderIndices) => {
-    const currentDay = activeFolder.days[routedDayIndex];
-    if (currentDay && optimizedOrderIndices && optimizedOrderIndices.length === currentDay.items.length - 2) {
-      const start = currentDay.items[0];
-      const end = currentDay.items[currentDay.items.length - 1];
-      const waypoints = currentDay.items.slice(1, -1);
+    const currentDay = (activeFolderDays || [])[routedDayIndex];
+    const currentItems = currentDay?.items || [];
+    if (currentDay && optimizedOrderIndices && optimizedOrderIndices.length === currentItems.length - 2) {
+      const start = currentItems[0];
+      const end = currentItems[currentItems.length - 1];
+      const waypoints = currentItems.slice(1, -1);
       
       const newWaypoints = optimizedOrderIndices.map(index => waypoints[index]);
       const optimizedItems = [start, ...newWaypoints, end];
       
-      const isChanged = optimizedItems.some((item, i) => item.id !== currentDay.items[i].id);
+      const isChanged = optimizedItems.some((item, i) => item.id !== currentItems[i].id);
       if (isChanged) {
         handleDayItemsChange(currentDay.id, optimizedItems);
       }
@@ -194,12 +250,14 @@ const Schedule = () => {
     setRouteLegs(legs);
   };
 
-  const routeMarkers = activeFolder.days[routedDayIndex]?.items || [];
+  const activeFolderDays = activeFolderDays || [];
+  const activeFolderItems = activeFolderItems || [];
+  const routeMarkers = activeFolderDays[routedDayIndex]?.items || [];
   const routePlaceIds = new Set(routeMarkers.map(m => m.googlePlaceId || m.name));
-  
+
   const storageAndOtherMarkers = [
-    ...activeFolder.items,
-    ...activeFolder.days.filter((_, idx) => idx !== routedDayIndex).flatMap(d => d.items)
+    ...activeFolderItems,
+    ...activeFolderDays.filter((_, idx) => idx !== routedDayIndex).flatMap(d => d.items || [])
   ].filter(m => !routePlaceIds.has(m.googlePlaceId || m.name));
 
   return (
@@ -305,7 +363,7 @@ const Schedule = () => {
               {/* Day Tabs Navigation */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
                 <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--color-text)' }}>🗓️ 일정:</div>
-                {activeFolder.days.map((day, index) => (
+                {activeFolderDays.map((day, index) => (
                   <button
                     key={day.id}
                     onClick={() => setRoutedDayIndex(index)}
@@ -342,14 +400,14 @@ const Schedule = () => {
               </div>
 
               {/* Active Day Content */}
-              {activeFolder.days[routedDayIndex] && (
+              {activeFolderDays[routedDayIndex] && (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                     <h2 style={{ fontSize: '20px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
-                      📍 {activeFolder.days[routedDayIndex].title}
+                      📍 {activeFolderDays[routedDayIndex].title}
                     </h2>
                     <button 
-                      onClick={() => handleDeleteDay(activeFolder.days[routedDayIndex].id)}
+                      onClick={() => handleDeleteDay(activeFolderDays[routedDayIndex].id)}
                       style={{
                         padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid #ff4d4f',
                         background: 'white', color: '#ff4d4f', cursor: 'pointer'
@@ -361,9 +419,9 @@ const Schedule = () => {
 
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     <SortableTimeline 
-                      listId={activeFolder.days[routedDayIndex].title}
-                      items={activeFolder.days[routedDayIndex].items} 
-                      setItems={(newItems) => handleDayItemsChange(activeFolder.days[routedDayIndex].id, newItems)} 
+                      listId={activeFolderDays[routedDayIndex].title}
+                      items={activeFolderDays[routedDayIndex].items} 
+                      setItems={(newItems) => handleDayItemsChange(activeFolderDays[routedDayIndex].id, newItems)} 
                       groupName="schedule" 
                       onDelete={handleDeletePlace}
                       routeLegs={routeLegs}
@@ -377,7 +435,7 @@ const Schedule = () => {
 
         {/* RIGHT COLUMN (50%): Search & Storage (Full Height) */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', overflowY: 'auto' }}>
-          <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolder.items} />
+          <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolderItems} />
           
           <div style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <h2 style={{ fontSize: '20px', marginBottom: '15px', marginTop: 0, color: 'var(--color-text)', fontWeight: 'bold' }}>
@@ -405,12 +463,12 @@ const Schedule = () => {
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <SortableTimeline 
                 listId={storageCategory === '전체' ? "보관함" : `보관함 (${storageCategory})`}
-                items={storageCategory === '전체' ? activeFolder.items : activeFolder.items.filter(item => (item.category || '기타') === storageCategory)} 
+                items={storageCategory === '전체' ? activeFolderItems : activeFolderItems.filter(item => (item.category || '기타') === storageCategory)} 
                 setItems={handleActiveFolderItemsChange} 
                 groupName="schedule" 
                 onDelete={handleDeletePlace}
                 isCloneable={true}
-                scheduledPlaceIds={activeFolder.days.flatMap(day => day.items.map(item => item.googlePlaceId || item.name))}
+                scheduledPlaceIds={activeFolderDays.flatMap(day => (day.items || []).map(item => item.googlePlaceId || item.name))}
               />
             </div>
           </div>
