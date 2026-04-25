@@ -41,9 +41,14 @@ const normalizeFolders = (data) => {
     }));
 };
 
+const FB_ROOT = 'travel-mate-app';
+const LS_FOLDERS_KEY = 'visitor_tool_folders';
+const LS_ACTIVE_FOLDER_KEY = 'visitor_tool_active_folder';
+const LS_TIMESTAMP_KEY = 'visitor_tool_last_modified';
+
 const getInitialFolders = () => {
   try {
-    const saved = localStorage.getItem('visitor_tool_folders');
+    const saved = localStorage.getItem(LS_FOLDERS_KEY);
     if (saved) {
       const parsed = normalizeFolders(JSON.parse(saved));
       if (parsed.length) return parsed;
@@ -54,9 +59,15 @@ const getInitialFolders = () => {
   return [initialFolder];
 };
 
+const getInitialLocalTimestamp = () => {
+  const raw = localStorage.getItem(LS_TIMESTAMP_KEY);
+  const n = parseInt(raw || '0', 10);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const getInitialActiveFolderId = (folders) => {
   try {
-    const saved = localStorage.getItem('visitor_tool_active_folder');
+    const saved = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
     if (saved && folders.some(f => f.id === saved)) return saved;
   } catch (e) {
     console.error(e);
@@ -77,19 +88,43 @@ const Schedule = () => {
   // Track the last snapshot applied from Firebase so we can suppress the
   // write-echo loop (set → onValue → setFolders → set → ...).
   const lastRemoteSnapshotRef = useRef(null);
+  // Timestamp of the latest local change. Initialized from localStorage so
+  // that on refresh we can tell whether our local data is newer than the
+  // remote and avoid being clobbered by a stale Firebase snapshot.
+  const localTimestampRef = useRef(getInitialLocalTimestamp());
 
   // Firebase Sync: Load data on mount
   React.useEffect(() => {
-    const foldersRef = ref(db, 'travel-mate-app/folders');
-    const unsubscribe = onValue(foldersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const normalized = normalizeFolders(data);
-        if (normalized.length) {
-          const serialized = JSON.stringify(normalized);
-          lastRemoteSnapshotRef.current = serialized;
-          setFolders(normalized);
+    const rootRef = ref(db, FB_ROOT);
+    const unsubscribe = onValue(rootRef, (snapshot) => {
+      const remote = snapshot.val();
+
+      // Backward compatibility: previously the app wrote the array directly
+      // to `${FB_ROOT}/folders`, so the parent node looks like
+      // { folders: [...] }. Newer writes also include `lastModifiedAt`.
+      let remoteFolders = null;
+      let remoteTs = 0;
+      if (remote && typeof remote === 'object') {
+        if ('folders' in remote) {
+          remoteFolders = remote.folders;
+          remoteTs = Number(remote.lastModifiedAt) || 0;
+        } else if (Array.isArray(remote) || Object.keys(remote).every(k => /^\d+$/.test(k))) {
+          remoteFolders = remote;
         }
+      }
+
+      const normalized = normalizeFolders(remoteFolders);
+      const localTs = localTimestampRef.current;
+
+      // Only let remote overwrite local state if remote is at least as
+      // recent as what we have locally. If our local edits are newer (e.g.
+      // the previous save raced a refresh), keep them — the save effect
+      // below will push them back up to Firebase.
+      if (normalized.length && remoteTs >= localTs) {
+        const serialized = JSON.stringify(normalized);
+        lastRemoteSnapshotRef.current = serialized;
+        localTimestampRef.current = remoteTs;
+        setFolders(normalized);
       }
       setIsFirebaseLoading(false);
     });
@@ -102,16 +137,20 @@ const Schedule = () => {
     const serialized = JSON.stringify(folders);
     // Skip writes that just echo what we just received from the server.
     if (serialized === lastRemoteSnapshotRef.current) return;
+    const now = Date.now();
     lastRemoteSnapshotRef.current = serialized;
-    const foldersRef = ref(db, 'travel-mate-app/folders');
-    set(foldersRef, folders);
-    localStorage.setItem('visitor_tool_folders', serialized);
+    localTimestampRef.current = now;
+    set(ref(db, FB_ROOT), { folders, lastModifiedAt: now }).catch((err) => {
+      console.error('Firebase write failed:', err);
+    });
+    localStorage.setItem(LS_FOLDERS_KEY, serialized);
+    localStorage.setItem(LS_TIMESTAMP_KEY, String(now));
   }, [folders, isFirebaseLoading]);
 
   // Persist the selected folder across refreshes.
   React.useEffect(() => {
     if (activeFolderId) {
-      localStorage.setItem('visitor_tool_active_folder', activeFolderId);
+      localStorage.setItem(LS_ACTIVE_FOLDER_KEY, activeFolderId);
     }
   }, [activeFolderId]);
 
