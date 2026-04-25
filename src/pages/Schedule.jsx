@@ -46,8 +46,7 @@ const normalizeFolders = (data) => {
     }));
 };
 
-// Read from localStorage for instant first paint (before Firebase responds).
-const getCachedFolders = () => {
+const loadFromLocalStorage = () => {
   try {
     const raw = localStorage.getItem(LS_FOLDERS_KEY);
     if (raw) {
@@ -58,7 +57,7 @@ const getCachedFolders = () => {
   return DEFAULT_FOLDERS;
 };
 
-const getCachedActiveFolderId = (folders) => {
+const loadActiveFolderIdFromLocalStorage = (folders) => {
   try {
     const saved = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
     if (saved && folders.some((f) => f.id === saved)) return saved;
@@ -68,120 +67,140 @@ const getCachedActiveFolderId = (folders) => {
 
 // ─── component ────────────────────────────────────────────────────────────────
 const Schedule = () => {
-  // Initialise state from localStorage so the UI is usable immediately.
-  const [folders, setFolders] = useState(getCachedFolders);
+  const [folders, setFolders] = useState(loadFromLocalStorage);
   const [activeFolderId, setActiveFolderId] = useState(() =>
-    getCachedActiveFolderId(getCachedFolders())
+    loadActiveFolderIdFromLocalStorage(loadFromLocalStorage())
   );
   const [newFolderName, setNewFolderName] = useState('');
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [routedDayIndex, setRoutedDayIndex] = useState(0);
   const [routeLegs, setRouteLegs] = useState([]);
   const [storageCategory, setStorageCategory] = useState('전체');
-  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
 
-  // True while we are applying the first Firebase snapshot — prevents the
-  // save effect from writing local state back before we've read the remote.
-  const applyingRemoteRef = useRef(false);
-  // Serialized string of the last data we wrote to Firebase so we can
-  // skip the echo that comes back via onValue.
-  const lastWrittenRef = useRef(null);
+  // Firebase sync state – does NOT block localStorage saving.
+  const fbReadyRef = useRef(false);
+  const isApplyingRemoteRef = useRef(false);
+  const lastFbWriteRef = useRef(null);
+  // Track whether this is the very first render after mount so we can
+  // distinguish "initial state" from "user-triggered state change".
+  const isFirstRenderRef = useRef(true);
 
-  // ── LOAD: Subscribe to Firebase and keep local state in sync ──────────────
+  // ── EFFECT 1: Always save to localStorage immediately on every change ──────
+  // This is COMPLETELY independent of Firebase. Even if Firebase is down,
+  // data is always persisted locally so refresh works.
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      // Don't overwrite localStorage with the initial value we just read from it.
+      isFirstRenderRef.current = false;
+      return;
+    }
+    // If this change came from Firebase, still save to localStorage (keep cache fresh).
+    const serialized = JSON.stringify(folders);
+    localStorage.setItem(LS_FOLDERS_KEY, serialized);
+  }, [folders]);
+
+  // ── EFFECT 2: Firebase subscribe (load) ───────────────────────────────────
   useEffect(() => {
     const rootRef = ref(db, FB_ROOT);
 
-    const unsubscribe = onValue(rootRef, (snapshot) => {
-      const remote = snapshot.val();
+    const unsubscribe = onValue(
+      rootRef,
+      (snapshot) => {
+        const remote = snapshot.val();
 
-      // Parse whichever shape the data is in.
-      let remoteFolders = null;
-      if (remote && typeof remote === 'object') {
-        if ('folders' in remote) {
-          remoteFolders = remote.folders;
-        } else if (
-          Array.isArray(remote) ||
-          Object.keys(remote).every((k) => /^\d+$/.test(k))
-        ) {
-          remoteFolders = remote;
-        }
-      }
-
-      const normalized = normalizeFolders(remoteFolders);
-
-      // If Firebase has real data, it always wins on the first load.
-      // After the first load, skip echoes of our own writes.
-      if (normalized.length) {
-        const serialized = JSON.stringify(normalized);
-
-        if (!isFirebaseReady) {
-          // First snapshot: unconditionally apply Firebase data.
-          applyingRemoteRef.current = true;
-          setFolders(normalized);
-          // Restore active folder id, validating against real data.
-          const savedId = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
-          if (savedId && normalized.some((f) => f.id === savedId)) {
-            setActiveFolderId(savedId);
-          } else {
-            setActiveFolderId(normalized[0]?.id);
+        let remoteFolders = null;
+        if (remote && typeof remote === 'object') {
+          if ('folders' in remote) {
+            remoteFolders = remote.folders;
+          } else if (
+            Array.isArray(remote) ||
+            Object.keys(remote).every((k) => /^\d+$/.test(k))
+          ) {
+            remoteFolders = remote;
           }
-          // Update localStorage cache immediately.
-          localStorage.setItem(LS_FOLDERS_KEY, serialized);
-          lastWrittenRef.current = serialized;
-        } else if (serialized !== lastWrittenRef.current) {
-          // Subsequent snapshot that differs from what we last wrote
-          // (i.e. an update from another device / tab).
-          applyingRemoteRef.current = true;
-          setFolders(normalized);
-          localStorage.setItem(LS_FOLDERS_KEY, serialized);
-          lastWrittenRef.current = serialized;
         }
-        // If serialized === lastWrittenRef.current it's the echo of our own
-        // write — do nothing.
+
+        const normalized = normalizeFolders(remoteFolders);
+
+        if (normalized.length) {
+          const serialized = JSON.stringify(normalized);
+
+          if (!fbReadyRef.current) {
+            // Very first Firebase snapshot:
+            // Firebase data wins – it is the canonical source of truth.
+            isApplyingRemoteRef.current = true;
+            setFolders(normalized);
+
+            // Restore saved active folder, validate against real data.
+            const savedId = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
+            if (savedId && normalized.some((f) => f.id === savedId)) {
+              setActiveFolderId(savedId);
+            } else {
+              setActiveFolderId(normalized[0]?.id);
+            }
+
+            lastFbWriteRef.current = serialized;
+          } else if (serialized !== lastFbWriteRef.current) {
+            // Later snapshot from another device / tab.
+            isApplyingRemoteRef.current = true;
+            setFolders(normalized);
+            lastFbWriteRef.current = serialized;
+          }
+        }
+
+        fbReadyRef.current = true;
+      },
+      (error) => {
+        // Firebase error (e.g. no network, permission denied).
+        // Mark as ready so saves still work via localStorage.
+        console.warn('Firebase onValue error:', error);
+        fbReadyRef.current = true;
       }
+    );
 
-      setIsFirebaseReady(true);
-    });
+    // Fallback: if Firebase doesn't respond within 6 seconds, mark ready
+    // so the UI is never stuck (happens on slow mobile connections).
+    const fallbackTimer = setTimeout(() => {
+      if (!fbReadyRef.current) {
+        console.warn('Firebase timeout – falling back to localStorage');
+        fbReadyRef.current = true;
+      }
+    }, 6000);
 
-    return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      unsubscribe();
+      clearTimeout(fallbackTimer);
+    };
   }, []);
 
-  // ── SAVE: Push user edits to Firebase ─────────────────────────────────────
+  // ── EFFECT 3: Firebase save (only for user-triggered changes) ────────────
   useEffect(() => {
-    // Skip until Firebase has loaded at least once.
-    if (!isFirebaseReady) return;
-
-    // Skip if this state change was caused by applying a remote snapshot.
-    if (applyingRemoteRef.current) {
-      applyingRemoteRef.current = false;
+    // Skip if this update was triggered by applying a remote snapshot.
+    if (isApplyingRemoteRef.current) {
+      isApplyingRemoteRef.current = false;
       return;
     }
 
+    // Skip the initial render.
+    if (!fbReadyRef.current) return;
+
     const serialized = JSON.stringify(folders);
+    if (serialized === lastFbWriteRef.current) return;
 
-    // Skip if nothing changed compared to the last thing we wrote.
-    if (serialized === lastWrittenRef.current) return;
-
-    lastWrittenRef.current = serialized;
-
-    // Persist to Firebase.
+    lastFbWriteRef.current = serialized;
     set(ref(db, FB_ROOT), { folders, lastModifiedAt: Date.now() }).catch(
       (err) => console.error('Firebase write failed:', err)
     );
+  }, [folders]);
 
-    // Keep localStorage cache up to date.
-    localStorage.setItem(LS_FOLDERS_KEY, serialized);
-  }, [folders, isFirebaseReady]);
-
-  // Persist the active folder selection.
+  // ── Persist active folder selection ───────────────────────────────────────
   useEffect(() => {
     if (activeFolderId) {
       localStorage.setItem(LS_ACTIVE_FOLDER_KEY, activeFolderId);
     }
   }, [activeFolderId]);
 
-  // Fallback if the active folder was deleted.
+  // Fallback if active folder was deleted.
   useEffect(() => {
     if (!folders.find((f) => f.id === activeFolderId)) {
       setActiveFolderId(folders[0]?.id);
@@ -290,9 +309,7 @@ const Schedule = () => {
     e.stopPropagation();
     if (folders.length === 1)
       return alert('최소 1개의 여행지는 필요합니다.');
-    if (
-      window.confirm('이 여행지를 삭제하시겠습니까? (내부 데이터 모두 삭제)')
-    ) {
+    if (window.confirm('이 여행지를 삭제하시겠습니까? (내부 데이터 모두 삭제)')) {
       const newFolders = folders.filter((f) => f.id !== folderId);
       setFolders(newFolders);
       if (activeFolderId === folderId) setActiveFolderId(newFolders[0].id);
@@ -309,11 +326,7 @@ const Schedule = () => {
             ...folder,
             days: [
               ...days,
-              {
-                id: 'day' + Date.now(),
-                title: `Day ${nextNum}`,
-                items: [],
-              },
+              { id: 'day' + Date.now(), title: `Day ${nextNum}`, items: [] },
             ],
           };
         }
@@ -337,7 +350,7 @@ const Schedule = () => {
   };
 
   const handleRouteOptimized = (optimizedOrderIndices) => {
-    const currentDay = (activeFolderDays || [])[routedDayIndex];
+    const currentDay = activeFolderDays[routedDayIndex];
     const currentItems = currentDay?.items || [];
     if (
       currentDay &&
@@ -362,18 +375,7 @@ const Schedule = () => {
   return (
     <div className="schedule-page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
 
-      {/* Firebase loading overlay — subtle, doesn't block UI */}
-      {!isFirebaseReady && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0,
-          background: 'var(--color-point)', color: 'white',
-          textAlign: 'center', fontSize: '12px', padding: '4px', zIndex: 9999
-        }}>
-          ☁️ 데이터 불러오는 중…
-        </div>
-      )}
-
-      {/* Country/Folder Menu Bar */}
+      {/* Folder / Country Bar */}
       <div className="flex-row schedule-folder-bar" style={{
         padding: '12px 16px',
         background: 'var(--color-card)',
@@ -386,13 +388,9 @@ const Schedule = () => {
         <ReactSortable
           list={folders}
           setList={(newList) => {
-            // ReactSortable calls setList on mount; ignore that by checking
-            // that the new list is meaningfully different (same IDs, diff order).
             const oldIds = folders.map((f) => f.id).join(',');
             const newIds = newList.map((f) => f.id).join(',');
-            if (oldIds !== newIds && isFirebaseReady) {
-              setFolders(newList);
-            }
+            if (oldIds !== newIds) setFolders(newList);
           }}
           animation={150}
           style={{ display: 'flex', gap: '8px' }}
@@ -459,13 +457,12 @@ const Schedule = () => {
         )}
       </div>
 
-      {/* Main Container: 50/50 Left-Right Split */}
+      {/* Main Container */}
       <div className="schedule-main" style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }}>
 
-        {/* LEFT COLUMN: Map (Top) + Schedule (Bottom) */}
+        {/* LEFT: Map + Timeline */}
         <div className="schedule-col-left" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)' }}>
 
-          {/* Map */}
           <div className="schedule-map" style={{ flex: 1, position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
             <Map
               storageMarkers={storageAndOtherMarkers}
@@ -476,11 +473,9 @@ const Schedule = () => {
             />
           </div>
 
-          {/* Timeline */}
           <div className="schedule-timeline-wrap" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
             <div className="schedule-timeline-card" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-              {/* Day Tabs */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
                 <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--color-text)' }}>🗓️ 일정:</div>
                 {activeFolderDays.map((day, index) => (
@@ -507,7 +502,6 @@ const Schedule = () => {
                 </button>
               </div>
 
-              {/* Active Day Content */}
               {activeFolderDays[routedDayIndex] && (
                 <div className="schedule-timeline-day" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
@@ -538,7 +532,7 @@ const Schedule = () => {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Search & Storage */}
+        {/* RIGHT: Search + Storage */}
         <div className="schedule-col-right" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', overflowY: 'auto' }}>
           <div className="schedule-search">
             <PlaceSearch onAddPlace={handleAddPlace} storageItems={activeFolderItems} />
@@ -549,7 +543,6 @@ const Schedule = () => {
               🗂️ 보관함
             </h2>
 
-            {/* Category Filter */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '4px' }}>
               {['전체', '관광명소', '맛집', '카페', '숙소', '기타'].map((cat) => (
                 <button
