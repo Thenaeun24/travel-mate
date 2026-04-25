@@ -174,15 +174,21 @@ const Schedule = () => {
   }, []);
 
   // ── EFFECT 3: Firebase save (only for user-triggered changes) ────────────
+  // NOTE: We do NOT guard on fbReadyRef here. Firebase SDK automatically
+  // queues writes when offline and flushes them once connected. Guarding on
+  // fbReadyRef was causing edits made before the first onValue response to
+  // be silently dropped — the root cause of cross-device sync failures.
   useEffect(() => {
-    // Skip if this update was triggered by applying a remote snapshot.
+    // Skip the very first render (initial state loaded from localStorage).
+    // We don't want to overwrite Firebase with potentially stale local data
+    // before we've had a chance to read the remote value.
+    if (isFirstRenderRef.current) return;
+
+    // Skip if this state change was caused by applying a remote snapshot.
     if (isApplyingRemoteRef.current) {
       isApplyingRemoteRef.current = false;
       return;
     }
-
-    // Skip the initial render.
-    if (!fbReadyRef.current) return;
 
     const serialized = JSON.stringify(folders);
     if (serialized === lastFbWriteRef.current) return;
@@ -463,7 +469,7 @@ const Schedule = () => {
         {/* LEFT: Map + Timeline */}
         <div className="schedule-col-left" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)' }}>
 
-          <div className="schedule-map" style={{ flex: 1, position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
+          <div className="schedule-map" style={{ flex: '0 0 38%', position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
             <Map
               storageMarkers={storageAndOtherMarkers}
               routeMarkers={routeMarkers}
@@ -473,7 +479,7 @@ const Schedule = () => {
             />
           </div>
 
-          <div className="schedule-timeline-wrap" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
+          <div className="schedule-timeline-wrap" style={{ flex: '0 0 62%', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
             <div className="schedule-timeline-card" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
