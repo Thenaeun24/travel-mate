@@ -41,7 +41,15 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--color-text-light)' }}>{listId}</h3>
       <ReactSortable 
         list={items} 
-        setList={setItems} 
+        setList={(newList) => {
+          // ReactSortable calls setList on mount and on every render.
+          // Only propagate if the list actually changed (different IDs or order).
+          const oldIds = items.map((i) => i.id).join(',');
+          const newIds = newList.map((i) => i.id).join(',');
+          if (oldIds !== newIds) {
+            setItems(newList);
+          }
+        }}
         group={isCloneable ? { name: groupName, pull: 'clone', put: false } : groupName}
         clone={isCloneable ? (item) => ({ ...item, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) }) : undefined}
         animation={150}
