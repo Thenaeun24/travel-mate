@@ -3,221 +3,26 @@ import { ReactSortable } from 'react-sortablejs';
 import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
 import PlaceSearch from '../components/PlaceSearch';
-import { db } from '../firebase';
-import { ref, onValue, set } from 'firebase/database';
-
-// ─── constants ────────────────────────────────────────────────────────────────
-const FB_ROOT = 'travel-mate-app';
-const LS_FOLDERS_KEY = 'visitor_tool_folders';
-const LS_ACTIVE_FOLDER_KEY = 'visitor_tool_active_folder';
-
-const DEFAULT_FOLDERS = [
-  {
-    id: 'f1',
-    name: '일본 오사카',
-    items: [],
-    days: [
-      { id: 'day1', title: 'Day 1', items: [] },
-      { id: 'day2', title: 'Day 2', items: [] },
-    ],
-  },
-];
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-const toArray = (val) => {
-  if (Array.isArray(val)) return val;
-  if (val && typeof val === 'object') return Object.values(val);
-  return [];
-};
-
-const normalizeFolders = (data) => {
-  const list = toArray(data);
-  return list
-    .filter((f) => f && typeof f === 'object')
-    .map((folder) => ({
-      ...folder,
-      items: toArray(folder.items).filter((i) => i && typeof i === 'object'),
-      days: toArray(folder.days)
-        .filter((d) => d && typeof d === 'object')
-        .map((day) => ({
-          ...day,
-          items: toArray(day.items).filter((i) => i && typeof i === 'object'),
-        })),
-    }));
-};
-
-const loadFromLocalStorage = () => {
-  try {
-    const raw = localStorage.getItem(LS_FOLDERS_KEY);
-    if (raw) {
-      const parsed = normalizeFolders(JSON.parse(raw));
-      if (parsed.length) return parsed;
-    }
-  } catch (_) {}
-  return DEFAULT_FOLDERS;
-};
-
-const loadActiveFolderIdFromLocalStorage = (folders) => {
-  try {
-    const saved = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
-    if (saved && folders.some((f) => f.id === saved)) return saved;
-  } catch (_) {}
-  return folders[0]?.id;
-};
 
 // ─── component ────────────────────────────────────────────────────────────────
-const Schedule = () => {
-  const [folders, setFolders] = useState(loadFromLocalStorage);
-  const [activeFolderId, setActiveFolderId] = useState(() =>
-    loadActiveFolderIdFromLocalStorage(loadFromLocalStorage())
-  );
+const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   const [newFolderName, setNewFolderName] = useState('');
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [routedDayIndex, setRoutedDayIndex] = useState(0);
   const [routeLegs, setRouteLegs] = useState([]);
   const [storageCategory, setStorageCategory] = useState('전체');
 
-  // Firebase sync state – does NOT block localStorage saving.
-  const fbReadyRef = useRef(false);
-  const isApplyingRemoteRef = useRef(false);
-  const lastFbWriteRef = useRef(null);
-  // Track whether this is the very first render after mount so we can
-  // distinguish "initial state" from "user-triggered state change".
-  const isFirstRenderRef = useRef(true);
-
-  // ── EFFECT 1: Always save to localStorage immediately on every change ──────
-  // This is COMPLETELY independent of Firebase. Even if Firebase is down,
-  // data is always persisted locally so refresh works.
-  useEffect(() => {
-    if (isFirstRenderRef.current) {
-      // Don't overwrite localStorage with the initial value we just read from it.
-      isFirstRenderRef.current = false;
-      return;
-    }
-    // If this change came from Firebase, still save to localStorage (keep cache fresh).
-    const serialized = JSON.stringify(folders);
-    localStorage.setItem(LS_FOLDERS_KEY, serialized);
-  }, [folders]);
-
-  // ── EFFECT 2: Firebase subscribe (load) ───────────────────────────────────
-  useEffect(() => {
-    const rootRef = ref(db, FB_ROOT);
-
-    const unsubscribe = onValue(
-      rootRef,
-      (snapshot) => {
-        const remote = snapshot.val();
-
-        let remoteFolders = null;
-        if (remote && typeof remote === 'object') {
-          if ('folders' in remote) {
-            remoteFolders = remote.folders;
-          } else if (
-            Array.isArray(remote) ||
-            Object.keys(remote).every((k) => /^\d+$/.test(k))
-          ) {
-            remoteFolders = remote;
-          }
-        }
-
-        const normalized = normalizeFolders(remoteFolders);
-
-        if (normalized.length) {
-          const serialized = JSON.stringify(normalized);
-
-          if (!fbReadyRef.current) {
-            // Very first Firebase snapshot:
-            // Firebase data wins – it is the canonical source of truth.
-            isApplyingRemoteRef.current = true;
-            setFolders(normalized);
-
-            // Restore saved active folder, validate against real data.
-            const savedId = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
-            if (savedId && normalized.some((f) => f.id === savedId)) {
-              setActiveFolderId(savedId);
-            } else {
-              setActiveFolderId(normalized[0]?.id);
-            }
-
-            lastFbWriteRef.current = serialized;
-          } else if (serialized !== lastFbWriteRef.current) {
-            // Later snapshot from another device / tab.
-            isApplyingRemoteRef.current = true;
-            setFolders(normalized);
-            lastFbWriteRef.current = serialized;
-          }
-        }
-
-        fbReadyRef.current = true;
-      },
-      (error) => {
-        // Firebase error (e.g. no network, permission denied).
-        // Mark as ready so saves still work via localStorage.
-        console.warn('Firebase onValue error:', error);
-        fbReadyRef.current = true;
-      }
-    );
-
-    // Fallback: if Firebase doesn't respond within 6 seconds, mark ready
-    // so the UI is never stuck (happens on slow mobile connections).
-    const fallbackTimer = setTimeout(() => {
-      if (!fbReadyRef.current) {
-        console.warn('Firebase timeout – falling back to localStorage');
-        fbReadyRef.current = true;
-      }
-    }, 6000);
-
-    return () => {
-      unsubscribe();
-      clearTimeout(fallbackTimer);
-    };
-  }, []);
-
-  // ── EFFECT 3: Firebase save (only for user-triggered changes) ────────────
-  // NOTE: We do NOT guard on fbReadyRef here. Firebase SDK automatically
-  // queues writes when offline and flushes them once connected. Guarding on
-  // fbReadyRef was causing edits made before the first onValue response to
-  // be silently dropped — the root cause of cross-device sync failures.
-  useEffect(() => {
-    // Skip the very first render (initial state loaded from localStorage).
-    // We don't want to overwrite Firebase with potentially stale local data
-    // before we've had a chance to read the remote value.
-    if (isFirstRenderRef.current) return;
-
-    // Skip if this state change was caused by applying a remote snapshot.
-    if (isApplyingRemoteRef.current) {
-      isApplyingRemoteRef.current = false;
-      return;
-    }
-
-    const serialized = JSON.stringify(folders);
-    if (serialized === lastFbWriteRef.current) return;
-
-    lastFbWriteRef.current = serialized;
-    set(ref(db, FB_ROOT), { folders, lastModifiedAt: Date.now() }).catch(
-      (err) => console.error('Firebase write failed:', err)
-    );
-  }, [folders]);
-
-  // ── Persist active folder selection ───────────────────────────────────────
-  useEffect(() => {
-    if (activeFolderId) {
-      localStorage.setItem(LS_ACTIVE_FOLDER_KEY, activeFolderId);
-    }
-  }, [activeFolderId]);
-
-  // Fallback if active folder was deleted.
-  useEffect(() => {
-    if (!folders.find((f) => f.id === activeFolderId)) {
-      setActiveFolderId(folders[0]?.id);
-    }
-  }, [folders, activeFolderId]);
-
   // ── Derived values ─────────────────────────────────────────────────────────
+  const DEFAULT_FOLDER = {
+    id: 'f1', name: '일본 오사카',
+    items: [], days: [{ id: 'day1', title: 'Day 1', items: [] }, { id: 'day2', title: 'Day 2', items: [] }],
+    expenses: [],
+  };
+
   const activeFolder =
     folders.find((f) => f.id === activeFolderId) ||
     folders[0] ||
-    DEFAULT_FOLDERS[0];
+    DEFAULT_FOLDER;
 
   const activeFolderDays = activeFolder.days || [];
   const activeFolderItems = activeFolder.items || [];
@@ -303,6 +108,7 @@ const Schedule = () => {
           { id: 'day1', title: 'Day 1', items: [] },
           { id: 'day2', title: 'Day 2', items: [] },
         ],
+        expenses: [],
       };
       setFolders((prev) => [...prev, newFolder]);
       setActiveFolderId(newFolder.id);
