@@ -92,6 +92,10 @@ const Schedule = () => {
   // that on refresh we can tell whether our local data is newer than the
   // remote and avoid being clobbered by a stale Firebase snapshot.
   const localTimestampRef = useRef(getInitialLocalTimestamp());
+  // Guard: do NOT save to Firebase until we have received at least one
+  // snapshot from the server. Without this, a refresh can push stale
+  // localStorage data back up before the real remote data arrives.
+  const hasReceivedRemoteRef = useRef(false);
 
   // Firebase Sync: Load data on mount
   React.useEffect(() => {
@@ -116,11 +120,15 @@ const Schedule = () => {
       const normalized = normalizeFolders(remoteFolders);
       const localTs = localTimestampRef.current;
 
-      // Only let remote overwrite local state if remote is at least as
-      // recent as what we have locally. If our local edits are newer (e.g.
-      // the previous save raced a refresh), keep them — the save effect
-      // below will push them back up to Firebase.
-      if (normalized.length && remoteTs >= localTs) {
+      // Mark that we have received at least one Firebase snapshot.
+      // The save effect must NOT run before this point.
+      hasReceivedRemoteRef.current = true;
+
+      // Only let remote overwrite local state if the remote timestamp is
+      // strictly newer than what we have locally.  Using strict `>` means
+      // the echo of our own write (same timestamp) will not clobber the
+      // already-correct local state.
+      if (normalized.length && remoteTs > localTs) {
         const serialized = JSON.stringify(normalized);
         lastRemoteSnapshotRef.current = serialized;
         localTimestampRef.current = remoteTs;
@@ -133,7 +141,11 @@ const Schedule = () => {
 
   // Firebase Sync: Save data on change
   React.useEffect(() => {
-    if (isFirebaseLoading) return; // Don't sync back initial load or while loading
+    // Do NOT write until (a) the initial Firebase fetch has completed AND
+    // (b) we have actually received at least one remote snapshot.  This
+    // prevents a refresh from pushing stale localStorage data to Firebase
+    // before the real remote data has been read.
+    if (isFirebaseLoading || !hasReceivedRemoteRef.current) return;
     const serialized = JSON.stringify(folders);
     // Skip writes that just echo what we just received from the server.
     if (serialized === lastRemoteSnapshotRef.current) return;
@@ -317,7 +329,11 @@ const Schedule = () => {
         <div style={{ fontWeight: 'bold', marginRight: '8px', color: 'var(--color-point)' }}>✈️ 여행지:</div>
         <ReactSortable 
           list={folders} 
-          setList={setFolders} 
+          setList={(newList) => {
+            // Do not update during the initial Firebase load to prevent
+            // ReactSortable's internal reconciliation from corrupting state.
+            if (!isFirebaseLoading) setFolders(newList);
+          }} 
           animation={150} 
           style={{ display: 'flex', gap: '8px' }}
         >
