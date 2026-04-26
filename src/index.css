@@ -37,7 +37,7 @@ body {
 .page-container {
   flex: 1;
   overflow-y: auto;
-  padding-bottom: var(--bottom-nav-height);
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
 }
 
 /* Bottom Navigation */
@@ -46,7 +46,10 @@ body {
   bottom: 0;
   left: 0;
   width: 100%;
-  height: var(--bottom-nav-height);
+  /* Total height = nav content (64px) + iOS home indicator area.
+     With box-sizing: border-box, we must add safe-area to the height
+     so the padding doesn't squash the inner icons. */
+  height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   background-color: var(--color-card);
   display: flex;
   justify-content: space-around;
