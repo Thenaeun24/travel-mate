@@ -4,57 +4,73 @@ import { ReactSortable } from 'react-sortablejs';
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const containerRef = useRef(null);
-  const secondTouchYRef = useRef(null);
+  const dragTouchIdRef = useRef(null);   // identifier of the drag finger
+  const secondTouchYRef = useRef(null);  // last Y of the scroll finger
 
   useEffect(() => {
-    const handleTouchStart = (e) => {
-      // When sortablejs drag is active, the second finger's touchstart makes
-      // sortablejs restart the drag from that position (card "sticks" to second hand).
-      // Intercept it in capture phase so sortablejs never sees it, then
-      // record Y for scroll tracking.
-      if (document.querySelector('.sortable-ghost') && e.touches.length >= 2) {
-        e.stopImmediatePropagation();
-        secondTouchYRef.current = e.touches[e.touches.length - 1].clientY;
-      }
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Record which finger started the drag (first single touch on this container)
+    const onContainerTouchStart = (e) => {
+      if (e.touches.length === 1) dragTouchIdRef.current = e.touches[0].identifier;
     };
 
-    const handleTouchMove = (e) => {
-      if (!document.querySelector('.sortable-ghost') || e.touches.length < 2) {
+    const isDragActive = () => !!container.closest('.schedule-timeline-list, .schedule-storage-list')
+      ?.querySelector('.sortable-ghost');
+
+    // Prevent sortablejs from seeing the second finger's touchstart, which
+    // would cause it to restart the drag from that position ("sticks to hand").
+    const onDocTouchStart = (e) => {
+      if (!isDragActive() || e.touches.length < 2) return;
+      e.stopImmediatePropagation();
+      const second = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
+      secondTouchYRef.current = second?.clientY ?? null;
+    };
+
+    // Prevent sortablejs from seeing touchmove events that belong to the scroll
+    // finger — otherwise sortablejs moves the card to whichever finger last moved.
+    const onDocTouchMove = (e) => {
+      if (!isDragActive() || e.touches.length < 2) {
         secondTouchYRef.current = null;
         return;
       }
+      // Block sortablejs from processing this multi-touch move
+      e.stopImmediatePropagation();
 
-      const touchY = e.touches[1].clientY;
-      if (secondTouchYRef.current === null) {
-        secondTouchYRef.current = touchY;
-        return;
-      }
+      const second = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
+      if (!second) return;
+
+      const touchY = second.clientY;
+      if (secondTouchYRef.current === null) { secondTouchYRef.current = touchY; return; }
 
       const delta = secondTouchYRef.current - touchY;
-      const container = containerRef.current;
       const scrollEl =
-        container?.closest('.schedule-timeline-list') ||
-        container?.closest('.schedule-storage-list') ||
-        container?.parentElement;
+        container.closest('.schedule-timeline-list') ||
+        container.closest('.schedule-storage-list') ||
+        container.parentElement;
       if (scrollEl) scrollEl.scrollTop += delta;
       secondTouchYRef.current = touchY;
     };
 
-    const resetSecondTouch = (e) => {
+    const onReset = (e) => {
       if (e.touches.length < 2) secondTouchYRef.current = null;
+      if (e.touches.length === 0) dragTouchIdRef.current = null;
     };
 
-    // passive:false on touchstart so stopImmediatePropagation() works reliably
-    document.addEventListener('touchstart', handleTouchStart, { capture: true, passive: false });
-    document.addEventListener('touchmove', handleTouchMove, { capture: true, passive: true });
-    document.addEventListener('touchend', resetSecondTouch, { passive: true });
-    document.addEventListener('touchcancel', resetSecondTouch, { passive: true });
+    container.addEventListener('touchstart', onContainerTouchStart, { passive: true });
+    // passive:false required so stopImmediatePropagation() reliably blocks sortablejs
+    document.addEventListener('touchstart', onDocTouchStart, { capture: true, passive: false });
+    document.addEventListener('touchmove', onDocTouchMove, { capture: true, passive: false });
+    document.addEventListener('touchend', onReset, { passive: true });
+    document.addEventListener('touchcancel', onReset, { passive: true });
 
     return () => {
-      document.removeEventListener('touchstart', handleTouchStart, { capture: true });
-      document.removeEventListener('touchmove', handleTouchMove, { capture: true });
-      document.removeEventListener('touchend', resetSecondTouch);
-      document.removeEventListener('touchcancel', resetSecondTouch);
+      container.removeEventListener('touchstart', onContainerTouchStart);
+      document.removeEventListener('touchstart', onDocTouchStart, { capture: true });
+      document.removeEventListener('touchmove', onDocTouchMove, { capture: true });
+      document.removeEventListener('touchend', onReset);
+      document.removeEventListener('touchcancel', onReset);
     };
   }, []);
 
