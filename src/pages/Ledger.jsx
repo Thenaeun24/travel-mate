@@ -1,4 +1,54 @@
 import React, { useState, useEffect } from 'react';
+import ShareButton from '../components/ShareButton';
+
+const buildLedgerShareText = (folder, exchangeRate) => {
+  if (!folder) return '';
+  const expenses = folder.expenses || [];
+  const allItems = [
+    ...(folder.items || []),
+    ...(folder.days || []).flatMap((d) => d.items || []),
+  ];
+  const totalBudget = allItems.reduce((s, i) => s + Number(i.budget || 0), 0);
+  const totalExp = expenses.reduce((s, e) => {
+    const amt = Number(e.amount || 0);
+    return s + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
+  }, 0);
+  const remaining = totalBudget - totalExp;
+  const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+
+  const expByCat = {};
+  expenses.forEach((e) => {
+    const cat = e.category || '기타';
+    const amt = Number(e.amount || 0);
+    expByCat[cat] = (expByCat[cat] || 0) + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
+  });
+
+  const lines = [];
+  lines.push(`💰 ${folder.name} 가계부`);
+  lines.push('');
+  lines.push(`총 예산: ¥${fmt(totalBudget)}`);
+  lines.push(`총 지출: ¥${fmt(totalExp)}`);
+  lines.push(`잔액: ${remaining < 0 ? '-' : ''}¥${fmt(Math.abs(remaining))}`);
+
+  if (Object.keys(expByCat).length > 0) {
+    lines.push('');
+    lines.push('카테고리별 지출:');
+    Object.entries(expByCat).forEach(([cat, amt]) => {
+      lines.push(`- ${cat}: ¥${fmt(amt)}`);
+    });
+  }
+
+  if (expenses.length > 0) {
+    lines.push('');
+    lines.push(`지출 내역 (${expenses.length}건):`);
+    [...expenses].slice(-10).reverse().forEach((e) => {
+      const sym = e.currency === 'JPY' ? '¥' : e.currency === 'KRW' ? '₩' : e.currency === 'USD' ? '$' : '€';
+      lines.push(`- ${e.date} ${e.description} ${sym}${Number(e.amount).toLocaleString('ko-KR')}`);
+    });
+  }
+
+  return lines.join('\n');
+};
 
 const CATEGORY_COLORS = {
   '관광명소': '#A3CCDA',
@@ -165,6 +215,15 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
             {f.name}
           </button>
         ))}
+        <div style={{ marginLeft: 'auto' }}>
+          <ShareButton
+            label="가계부 공유"
+            getShareData={() => ({
+              title: `${activeFolder?.name || ''} 가계부`,
+              text: buildLedgerShareText(activeFolder, exchangeRate),
+            })}
+          />
+        </div>
       </div>
 
       {/* Exchange rate bar */}

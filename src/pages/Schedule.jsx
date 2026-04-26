@@ -3,6 +3,35 @@ import { ReactSortable } from 'react-sortablejs';
 import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
 import PlaceSearch from '../components/PlaceSearch';
+import ShareButton from '../components/ShareButton';
+
+const buildScheduleShareText = (folder) => {
+  if (!folder) return '';
+  const lines = [];
+  lines.push(`✈️ ${folder.name} 일정`);
+  const days = folder.days || [];
+  days.forEach((day, i) => {
+    const items = day.items || [];
+    if (items.length === 0) return;
+    lines.push('');
+    lines.push(`📅 ${day.title || `Day ${i + 1}`}`);
+    items.forEach((item) => {
+      const time = item.time ? `${item.time} ` : '';
+      const cat = item.category ? ` (${item.category})` : '';
+      lines.push(`- ${time}${item.name}${cat}`);
+    });
+  });
+  const storage = folder.items || [];
+  if (storage.length > 0) {
+    lines.push('');
+    lines.push('🗂️ 보관함');
+    storage.forEach((item) => {
+      const cat = item.category ? ` (${item.category})` : '';
+      lines.push(`- ${item.name}${cat}`);
+    });
+  }
+  return lines.join('\n');
+};
 
 // ─── component ────────────────────────────────────────────────────────────────
 const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
@@ -267,6 +296,16 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
             + 추가
           </button>
         )}
+
+        <div style={{ marginLeft: 'auto', paddingLeft: '8px' }}>
+          <ShareButton
+            label="일정 공유"
+            getShareData={() => ({
+              title: `${activeFolder.name} 일정`,
+              text: buildScheduleShareText(activeFolder),
+            })}
+          />
+        </div>
       </div>
 
       {/* Main Container */}
