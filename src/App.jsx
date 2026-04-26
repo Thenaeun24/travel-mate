@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ref, onValue, set } from 'firebase/database';
+import { ref, onValue, runTransaction } from 'firebase/database';
 import { db } from './firebase';
 import BottomTab from './components/BottomTab';
 import Schedule from './pages/Schedule';
@@ -48,6 +48,15 @@ const normalizeFolders = (data) => {
     }));
 };
 
+const extractRemoteFolders = (remote) => {
+  if (!remote || typeof remote !== 'object') return null;
+  if ('folders' in remote) return remote.folders;
+  if (Array.isArray(remote) || Object.keys(remote).every((k) => /^\d+$/.test(k))) {
+    return remote;
+  }
+  return null;
+};
+
 const loadFromLocalStorage = () => {
   try {
     const raw = localStorage.getItem(LS_FOLDERS_KEY);
@@ -69,28 +78,91 @@ const loadActiveFolderIdFromLocalStorage = (folders) => {
 
 // ─── App Component ────────────────────────────────────────────────────────────
 function App() {
-  const [folders, setFolders] = useState(loadFromLocalStorage);
+  const [folders, setLocalFolders] = useState(loadFromLocalStorage);
   const [activeFolderId, setActiveFolderId] = useState(() =>
     loadActiveFolderIdFromLocalStorage(loadFromLocalStorage())
   );
 
+  // Always-fresh ref to current folders (used inside transaction closures)
+  const foldersRef = useRef(folders);
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
+
   // Firebase sync state
   const fbReadyRef = useRef(false);
-  const isApplyingRemoteRef = useRef(false);
-  const lastFbWriteRef = useRef(null);
+  const lastWrittenSerializedRef = useRef(null);
+  const pendingTxCountRef = useRef(0);
   const isFirstRenderRef = useRef(true);
 
-  // ── EFFECT 1: Always save to localStorage immediately on every change ──────
+  // ── setFolders wrapper: optimistic local update + atomic Firebase write ────
+  const setFolders = useCallback((updater) => {
+    const isFn = typeof updater === 'function';
+
+    // 1) Optimistic local update — UI stays responsive
+    setLocalFolders((prev) => (isFn ? updater(prev) : updater));
+
+    // 2) If Firebase isn't ready yet, skip remote write to avoid clobbering
+    //    real remote data with stale defaults. The first remote snapshot will
+    //    reconcile, and subsequent edits will start syncing.
+    if (!fbReadyRef.current) return;
+
+    const rootRef = ref(db, FB_ROOT);
+    pendingTxCountRef.current += 1;
+
+    runTransaction(
+      rootRef,
+      (current) => {
+        // currentData can be null on the very first write or if the node was
+        // wiped externally. NEVER apply the updater to a fresh empty array —
+        // that's how all folders disappear at once. Use our latest local state
+        // as the base instead.
+        let baseFolders;
+        if (current === null) {
+          baseFolders = normalizeFolders(foldersRef.current);
+        } else {
+          baseFolders = normalizeFolders(extractRemoteFolders(current));
+          // Edge case: remote exists but parses to empty. Prefer local snapshot
+          // over wiping — same defensive reason as above.
+          if (baseFolders.length === 0 && foldersRef.current.length > 0) {
+            baseFolders = normalizeFolders(foldersRef.current);
+          }
+        }
+
+        const next = isFn ? updater(baseFolders) : updater;
+        const safeNext = normalizeFolders(next);
+
+        return { folders: safeNext, lastModifiedAt: Date.now() };
+      },
+      { applyLocally: false }
+    )
+      .then((result) => {
+        if (result.committed && result.snapshot) {
+          const written = result.snapshot.val();
+          const writtenFolders = normalizeFolders(extractRemoteFolders(written));
+          lastWrittenSerializedRef.current = JSON.stringify(writtenFolders);
+        }
+      })
+      .catch((err) => {
+        console.error('Firebase transaction failed:', err);
+      })
+      .finally(() => {
+        pendingTxCountRef.current -= 1;
+      });
+  }, []);
+
+  // ── EFFECT 1: Always save to localStorage immediately ─────────────────────
   useEffect(() => {
     if (isFirstRenderRef.current) {
       isFirstRenderRef.current = false;
       return;
     }
-    const serialized = JSON.stringify(folders);
-    localStorage.setItem(LS_FOLDERS_KEY, serialized);
+    try {
+      localStorage.setItem(LS_FOLDERS_KEY, JSON.stringify(folders));
+    } catch (_) {}
   }, [folders]);
 
-  // ── EFFECT 2: Firebase subscribe (load) ───────────────────────────────────
+  // ── EFFECT 2: Subscribe to Firebase remote changes ────────────────────────
   useEffect(() => {
     const rootRef = ref(db, FB_ROOT);
 
@@ -98,44 +170,40 @@ function App() {
       rootRef,
       (snapshot) => {
         const remote = snapshot.val();
-
-        let remoteFolders = null;
-        if (remote && typeof remote === 'object') {
-          if ('folders' in remote) {
-            remoteFolders = remote.folders;
-          } else if (
-            Array.isArray(remote) ||
-            Object.keys(remote).every((k) => /^\d+$/.test(k))
-          ) {
-            remoteFolders = remote;
-          }
-        }
-
+        const remoteFolders = extractRemoteFolders(remote);
         const normalized = normalizeFolders(remoteFolders);
+        const serialized = JSON.stringify(normalized);
 
-        if (normalized.length) {
-          const serialized = JSON.stringify(normalized);
-
-          if (!fbReadyRef.current) {
-            isApplyingRemoteRef.current = true;
-            setFolders(normalized);
-
+        if (!fbReadyRef.current) {
+          // First sync: only adopt remote data if it actually has content.
+          // Otherwise keep local state — it will be pushed up on first edit.
+          if (normalized.length > 0) {
+            setLocalFolders(normalized);
             const savedId = localStorage.getItem(LS_ACTIVE_FOLDER_KEY);
             if (savedId && normalized.some((f) => f.id === savedId)) {
               setActiveFolderId(savedId);
             } else {
               setActiveFolderId(normalized[0]?.id);
             }
-
-            lastFbWriteRef.current = serialized;
-          } else if (serialized !== lastFbWriteRef.current) {
-            isApplyingRemoteRef.current = true;
-            setFolders(normalized);
-            lastFbWriteRef.current = serialized;
+            lastWrittenSerializedRef.current = serialized;
           }
+          fbReadyRef.current = true;
+          return;
         }
 
-        fbReadyRef.current = true;
+        // Subsequent updates: apply only if different from what we just wrote.
+        // This filters out our own echoes and prevents needless re-renders.
+        if (serialized === lastWrittenSerializedRef.current) return;
+
+        // If we have transactions in flight, the snapshot might be stale
+        // relative to our optimistic state. Skip — the next echo (after our
+        // tx commits) will be authoritative.
+        if (pendingTxCountRef.current > 0) return;
+
+        if (normalized.length > 0) {
+          setLocalFolders(normalized);
+          lastWrittenSerializedRef.current = serialized;
+        }
       },
       (error) => {
         console.warn('Firebase onValue error:', error);
@@ -156,29 +224,6 @@ function App() {
     };
   }, []);
 
-  // ── EFFECT 3: Firebase save (only for user-triggered changes) ────────────
-  useEffect(() => {
-    if (isFirstRenderRef.current) return;
-
-    // Block writes until Firebase has responded (or fallback timer fires);
-    // otherwise the local default state would overwrite real remote data
-    // when a fresh browser/device first mounts the app.
-    if (!fbReadyRef.current) return;
-
-    if (isApplyingRemoteRef.current) {
-      isApplyingRemoteRef.current = false;
-      return;
-    }
-
-    const serialized = JSON.stringify(folders);
-    if (serialized === lastFbWriteRef.current) return;
-
-    lastFbWriteRef.current = serialized;
-    set(ref(db, FB_ROOT), { folders, lastModifiedAt: Date.now() }).catch(
-      (err) => console.error('Firebase write failed:', err)
-    );
-  }, [folders]);
-
   // ── Persist active folder selection ───────────────────────────────────────
   useEffect(() => {
     if (activeFolderId) {
@@ -196,9 +241,9 @@ function App() {
   return (
     <Router>
       <div className="app-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <header style={{ 
-          padding: '16px', 
-          background: 'white', 
+        <header style={{
+          padding: '16px',
+          background: 'white',
           borderBottom: '1px solid var(--color-border)',
           display: 'flex',
           justifyContent: 'center',
