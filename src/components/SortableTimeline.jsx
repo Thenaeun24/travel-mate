@@ -4,12 +4,15 @@ import { ReactSortable } from 'react-sortablejs';
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const containerRef = useRef(null);
-  const isDraggingRef = useRef(false);
   const secondTouchYRef = useRef(null);
 
   useEffect(() => {
     const handleTouchMove = (e) => {
-      if (!isDraggingRef.current || e.touches.length < 2) return;
+      // Detect active sortablejs drag via the ghost element it injects into the DOM
+      if (!document.querySelector('.sortable-ghost') || e.touches.length < 2) {
+        secondTouchYRef.current = null;
+        return;
+      }
 
       const touchY = e.touches[1].clientY;
       if (secondTouchYRef.current === null) {
@@ -27,16 +30,19 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       secondTouchYRef.current = touchY;
     };
 
-    const handleTouchEnd = (e) => {
+    const resetSecondTouch = (e) => {
       if (e.touches.length < 2) secondTouchYRef.current = null;
     };
 
-    document.addEventListener('touchmove', handleTouchMove, { passive: true });
-    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+    // capture:true ensures we fire before sortablejs's own listeners
+    document.addEventListener('touchmove', handleTouchMove, { capture: true, passive: true });
+    document.addEventListener('touchend', resetSecondTouch, { passive: true });
+    document.addEventListener('touchcancel', resetSecondTouch, { passive: true });
 
     return () => {
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('touchmove', handleTouchMove, { capture: true });
+      document.removeEventListener('touchend', resetSecondTouch);
+      document.removeEventListener('touchcancel', resetSecondTouch);
     };
   }, []);
 
@@ -93,8 +99,6 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         scroll={true}
         scrollSensitivity={50}
         ghostClass="sortable-ghost"
-        onStart={() => { isDraggingRef.current = true; }}
-        onEnd={() => { isDraggingRef.current = false; secondTouchYRef.current = null; }}
         style={{ minHeight: '80px' }}
       >
         {items.map((item, index) => {
