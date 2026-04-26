@@ -1,8 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ReactSortable } from 'react-sortablejs';
 
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
+  const containerRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const secondTouchYRef = useRef(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchStart = (e) => {
+      if (isDraggingRef.current && e.touches.length >= 2) {
+        secondTouchYRef.current = e.touches[1].clientY;
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (!isDraggingRef.current || e.touches.length < 2 || secondTouchYRef.current === null) return;
+      const currentY = e.touches[1].clientY;
+      const delta = secondTouchYRef.current - currentY;
+      const scrollEl =
+        container.closest('.schedule-timeline-list') ||
+        container.closest('.schedule-storage-list') ||
+        container.parentElement;
+      if (scrollEl) scrollEl.scrollTop += delta;
+      secondTouchYRef.current = currentY;
+    };
+
+    const handleTouchEnd = (e) => {
+      if (e.touches.length < 2) secondTouchYRef.current = null;
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: true });
+    container.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
 
   const getCategoryColor = (category) => {
     if (!category) return 'bg-green';
@@ -28,9 +68,10 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   };
 
   return (
-    <div 
-      className="timeline-container" 
-      style={{ 
+    <div
+      ref={containerRef}
+      className="timeline-container"
+      style={{
         minHeight: '100px', 
         padding: '10px', 
         background: 'var(--color-bg)', 
@@ -39,8 +80,8 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       }}
     >
       <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--color-text-light)' }}>{listId}</h3>
-      <ReactSortable 
-        list={items} 
+      <ReactSortable
+        list={items}
         setList={(newList) => {
           // ReactSortable calls setList on mount and on every render.
           // Only propagate if the list actually changed (different IDs or order).
@@ -56,6 +97,8 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         scroll={true}
         scrollSensitivity={50}
         ghostClass="sortable-ghost"
+        onStart={() => { isDraggingRef.current = true; }}
+        onEnd={() => { isDraggingRef.current = false; secondTouchYRef.current = null; }}
         style={{ minHeight: '80px' }}
       >
         {items.map((item, index) => {
