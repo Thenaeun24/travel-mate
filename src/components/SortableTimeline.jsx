@@ -7,8 +7,18 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   const secondTouchYRef = useRef(null);
 
   useEffect(() => {
+    const handleTouchStart = (e) => {
+      // When sortablejs drag is active, the second finger's touchstart makes
+      // sortablejs restart the drag from that position (card "sticks" to second hand).
+      // Intercept it in capture phase so sortablejs never sees it, then
+      // record Y for scroll tracking.
+      if (document.querySelector('.sortable-ghost') && e.touches.length >= 2) {
+        e.stopImmediatePropagation();
+        secondTouchYRef.current = e.touches[e.touches.length - 1].clientY;
+      }
+    };
+
     const handleTouchMove = (e) => {
-      // Detect active sortablejs drag via the ghost element it injects into the DOM
       if (!document.querySelector('.sortable-ghost') || e.touches.length < 2) {
         secondTouchYRef.current = null;
         return;
@@ -34,12 +44,14 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       if (e.touches.length < 2) secondTouchYRef.current = null;
     };
 
-    // capture:true ensures we fire before sortablejs's own listeners
+    // passive:false on touchstart so stopImmediatePropagation() works reliably
+    document.addEventListener('touchstart', handleTouchStart, { capture: true, passive: false });
     document.addEventListener('touchmove', handleTouchMove, { capture: true, passive: true });
     document.addEventListener('touchend', resetSecondTouch, { passive: true });
     document.addEventListener('touchcancel', resetSecondTouch, { passive: true });
 
     return () => {
+      document.removeEventListener('touchstart', handleTouchStart, { capture: true });
       document.removeEventListener('touchmove', handleTouchMove, { capture: true });
       document.removeEventListener('touchend', resetSecondTouch);
       document.removeEventListener('touchcancel', resetSecondTouch);
