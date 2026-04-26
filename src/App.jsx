@@ -160,6 +160,11 @@ function App() {
   useEffect(() => {
     if (isFirstRenderRef.current) return;
 
+    // Block writes until Firebase has responded (or fallback timer fires);
+    // otherwise the local default state would overwrite real remote data
+    // when a fresh browser/device first mounts the app.
+    if (!fbReadyRef.current) return;
+
     if (isApplyingRemoteRef.current) {
       isApplyingRemoteRef.current = false;
       return;
