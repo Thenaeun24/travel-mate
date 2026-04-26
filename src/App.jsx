@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ref, onValue, update } from 'firebase/database';
+import { ref, onValue, set } from 'firebase/database';
 import { db } from './firebase';
 import BottomTab from './components/BottomTab';
 import Schedule from './pages/Schedule';
@@ -79,10 +79,6 @@ function App() {
   const isApplyingRemoteRef = useRef(false);
   const lastFbWriteRef = useRef(null);
   const isFirstRenderRef = useRef(true);
-  // Snapshot of folders as last written to Firebase, used to compute per-folder diffs.
-  const prevFoldersRef = useRef([]);
-  // Numeric keys leftover from the old array-shape schema; nulled on next write.
-  const legacyKeysRef = useRef([]);
 
   // ── EFFECT 1: Always save to localStorage immediately on every change ──────
   useEffect(() => {
@@ -115,19 +111,6 @@ function App() {
           }
         }
 
-        // If folders are stored under numeric keys (old array shape), record those
-        // keys so the next write can null them out and migrate to id-keyed paths.
-        if (
-          !fbReadyRef.current &&
-          remoteFolders &&
-          typeof remoteFolders === 'object' &&
-          !Array.isArray(remoteFolders)
-        ) {
-          legacyKeysRef.current = Object.keys(remoteFolders).filter((k) =>
-            /^\d+$/.test(k)
-          );
-        }
-
         const normalized = normalizeFolders(remoteFolders);
 
         if (normalized.length) {
@@ -145,12 +128,10 @@ function App() {
             }
 
             lastFbWriteRef.current = serialized;
-            prevFoldersRef.current = normalized;
           } else if (serialized !== lastFbWriteRef.current) {
             isApplyingRemoteRef.current = true;
             setFolders(normalized);
             lastFbWriteRef.current = serialized;
-            prevFoldersRef.current = normalized;
           }
         }
 
@@ -186,57 +167,15 @@ function App() {
 
     if (isApplyingRemoteRef.current) {
       isApplyingRemoteRef.current = false;
-      prevFoldersRef.current = folders;
       return;
     }
 
     const serialized = JSON.stringify(folders);
     if (serialized === lastFbWriteRef.current) return;
 
-    // Build a multi-path update: only changed/added folders are written, and
-    // deleted folders (or legacy array-index entries) are nulled out. This
-    // keeps Firebase writes proportional to what actually changed instead of
-    // re-uploading the entire folders tree on every edit.
-    const prev = prevFoldersRef.current || [];
-    const updates = {};
-    const currentIds = new Set(folders.map((f) => f.id));
-
-    folders.forEach((folder) => {
-      const prevFolder = prev.find((f) => f.id === folder.id);
-      if (!prevFolder || JSON.stringify(prevFolder) !== JSON.stringify(folder)) {
-        updates[`folders/${folder.id}`] = folder;
-      }
-    });
-
-    prev.forEach((folder) => {
-      if (!currentIds.has(folder.id)) {
-        updates[`folders/${folder.id}`] = null;
-      }
-    });
-
-    // One-time migration: remove leftover numeric-index entries from the
-    // pre-id-keyed schema so they don't merge with the new keyed shape.
-    if (legacyKeysRef.current.length) {
-      legacyKeysRef.current.forEach((k) => {
-        if (!currentIds.has(k)) {
-          updates[`folders/${k}`] = null;
-        }
-      });
-      legacyKeysRef.current = [];
-    }
-
-    if (Object.keys(updates).length === 0) {
-      prevFoldersRef.current = folders;
-      lastFbWriteRef.current = serialized;
-      return;
-    }
-
-    updates.lastModifiedAt = Date.now();
     lastFbWriteRef.current = serialized;
-    prevFoldersRef.current = folders;
-
-    update(ref(db, FB_ROOT), updates).catch((err) =>
-      console.error('Firebase write failed:', err)
+    set(ref(db, FB_ROOT), { folders, lastModifiedAt: Date.now() }).catch(
+      (err) => console.error('Firebase write failed:', err)
     );
   }, [folders]);
 
