@@ -8,39 +8,35 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   const secondTouchYRef = useRef(null);
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleTouchStart = (e) => {
-      if (isDraggingRef.current && e.touches.length >= 2) {
-        secondTouchYRef.current = e.touches[1].clientY;
-      }
-    };
-
     const handleTouchMove = (e) => {
-      if (!isDraggingRef.current || e.touches.length < 2 || secondTouchYRef.current === null) return;
-      const currentY = e.touches[1].clientY;
-      const delta = secondTouchYRef.current - currentY;
+      if (!isDraggingRef.current || e.touches.length < 2) return;
+
+      const touchY = e.touches[1].clientY;
+      if (secondTouchYRef.current === null) {
+        secondTouchYRef.current = touchY;
+        return;
+      }
+
+      const delta = secondTouchYRef.current - touchY;
+      const container = containerRef.current;
       const scrollEl =
-        container.closest('.schedule-timeline-list') ||
-        container.closest('.schedule-storage-list') ||
-        container.parentElement;
+        container?.closest('.schedule-timeline-list') ||
+        container?.closest('.schedule-storage-list') ||
+        container?.parentElement;
       if (scrollEl) scrollEl.scrollTop += delta;
-      secondTouchYRef.current = currentY;
+      secondTouchYRef.current = touchY;
     };
 
     const handleTouchEnd = (e) => {
       if (e.touches.length < 2) secondTouchYRef.current = null;
     };
 
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
-    container.addEventListener('touchmove', handleTouchMove, { passive: true });
-    container.addEventListener('touchend', handleTouchEnd, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
     };
   }, []);
 
