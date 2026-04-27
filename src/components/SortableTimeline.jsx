@@ -1,97 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ReactSortable } from 'react-sortablejs';
 
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
-  const containerRef = useRef(null);
-  const dragTouchIdRef = useRef(null);
-  const secondTouchYRef = useRef(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const isDragActive = () =>
-      !!container.closest('.schedule-timeline-list, .schedule-storage-list')
-        ?.querySelector('.sortable-ghost');
-
-    const getScrollEl = () =>
-      container.closest('.schedule-timeline-list') ||
-      container.closest('.schedule-storage-list') ||
-      container.parentElement;
-
-    const scrollBy = (newY) => {
-      if (secondTouchYRef.current === null) { secondTouchYRef.current = newY; return; }
-      const el = getScrollEl();
-      if (el) el.scrollTop += secondTouchYRef.current - newY;
-      secondTouchYRef.current = newY;
-    };
-
-    // ── Touch Events ──────────────────────────────────────────────────────────
-    const onContainerTouchStart = (e) => {
-      if (e.touches.length === 1) dragTouchIdRef.current = e.touches[0].identifier;
-    };
-    const onDocTouchStart = (e) => {
-      if (!isDragActive() || e.touches.length < 2) return;
-      e.stopImmediatePropagation();
-      const t = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
-      secondTouchYRef.current = t?.clientY ?? null;
-    };
-    const onDocTouchMove = (e) => {
-      if (!isDragActive() || e.touches.length < 2) { secondTouchYRef.current = null; return; }
-      e.stopImmediatePropagation();
-      const t = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
-      if (t) scrollBy(t.clientY);
-    };
-    const onTouchReset = (e) => {
-      if (e.touches.length < 2) secondTouchYRef.current = null;
-      if (e.touches.length === 0) dragTouchIdRef.current = null;
-    };
-
-    // ── Pointer Events (covers browsers where sortablejs uses PointerEvents) ──
-    const onDocPointerDown = (e) => {
-      if (e.pointerType !== 'touch') return;
-      if (e.isPrimary) return; // first finger = drag finger, don't interfere
-      if (!isDragActive()) return;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      secondTouchYRef.current = e.clientY;
-    };
-    const onDocPointerMove = (e) => {
-      if (e.pointerType !== 'touch' || e.isPrimary || !isDragActive()) return;
-      e.stopImmediatePropagation();
-      scrollBy(e.clientY);
-    };
-    const onPointerReset = (e) => {
-      if (e.pointerType !== 'touch') return;
-      if (e.isPrimary) dragTouchIdRef.current = null;
-      else secondTouchYRef.current = null;
-    };
-
-    container.addEventListener('touchstart', onContainerTouchStart, { passive: true });
-    document.addEventListener('touchstart',  onDocTouchStart,  { capture: true, passive: false });
-    document.addEventListener('touchmove',   onDocTouchMove,   { capture: true, passive: false });
-    document.addEventListener('touchend',    onTouchReset,     { passive: true });
-    document.addEventListener('touchcancel', onTouchReset,     { passive: true });
-
-    document.addEventListener('pointerdown',   onDocPointerDown, { capture: true, passive: false });
-    document.addEventListener('pointermove',   onDocPointerMove, { capture: true, passive: false });
-    document.addEventListener('pointerup',     onPointerReset,   { passive: true });
-    document.addEventListener('pointercancel', onPointerReset,   { passive: true });
-
-    return () => {
-      container.removeEventListener('touchstart', onContainerTouchStart);
-      document.removeEventListener('touchstart',  onDocTouchStart,  { capture: true });
-      document.removeEventListener('touchmove',   onDocTouchMove,   { capture: true });
-      document.removeEventListener('touchend',    onTouchReset);
-      document.removeEventListener('touchcancel', onTouchReset);
-
-      document.removeEventListener('pointerdown',   onDocPointerDown, { capture: true });
-      document.removeEventListener('pointermove',   onDocPointerMove, { capture: true });
-      document.removeEventListener('pointerup',     onPointerReset);
-      document.removeEventListener('pointercancel', onPointerReset);
-    };
-  }, []);
 
   const getCategoryColor = (category) => {
     if (!category) return 'bg-green';
@@ -118,7 +29,6 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
 
   return (
     <div
-      ref={containerRef}
       className="timeline-container"
       style={{
         minHeight: '100px', 
