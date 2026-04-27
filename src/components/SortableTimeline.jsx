@@ -4,73 +4,92 @@ import { ReactSortable } from 'react-sortablejs';
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const containerRef = useRef(null);
-  const dragTouchIdRef = useRef(null);   // identifier of the drag finger
-  const secondTouchYRef = useRef(null);  // last Y of the scroll finger
+  const dragTouchIdRef = useRef(null);
+  const secondTouchYRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Record which finger started the drag (first single touch on this container)
+    const isDragActive = () =>
+      !!container.closest('.schedule-timeline-list, .schedule-storage-list')
+        ?.querySelector('.sortable-ghost');
+
+    const getScrollEl = () =>
+      container.closest('.schedule-timeline-list') ||
+      container.closest('.schedule-storage-list') ||
+      container.parentElement;
+
+    const scrollBy = (newY) => {
+      if (secondTouchYRef.current === null) { secondTouchYRef.current = newY; return; }
+      const el = getScrollEl();
+      if (el) el.scrollTop += secondTouchYRef.current - newY;
+      secondTouchYRef.current = newY;
+    };
+
+    // ── Touch Events ──────────────────────────────────────────────────────────
     const onContainerTouchStart = (e) => {
       if (e.touches.length === 1) dragTouchIdRef.current = e.touches[0].identifier;
     };
-
-    const isDragActive = () => !!container.closest('.schedule-timeline-list, .schedule-storage-list')
-      ?.querySelector('.sortable-ghost');
-
-    // Prevent sortablejs from seeing the second finger's touchstart, which
-    // would cause it to restart the drag from that position ("sticks to hand").
     const onDocTouchStart = (e) => {
       if (!isDragActive() || e.touches.length < 2) return;
       e.stopImmediatePropagation();
-      const second = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
-      secondTouchYRef.current = second?.clientY ?? null;
+      const t = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
+      secondTouchYRef.current = t?.clientY ?? null;
     };
-
-    // Prevent sortablejs from seeing touchmove events that belong to the scroll
-    // finger — otherwise sortablejs moves the card to whichever finger last moved.
     const onDocTouchMove = (e) => {
-      if (!isDragActive() || e.touches.length < 2) {
-        secondTouchYRef.current = null;
-        return;
-      }
-      // Block sortablejs from processing this multi-touch move
+      if (!isDragActive() || e.touches.length < 2) { secondTouchYRef.current = null; return; }
       e.stopImmediatePropagation();
-
-      const second = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
-      if (!second) return;
-
-      const touchY = second.clientY;
-      if (secondTouchYRef.current === null) { secondTouchYRef.current = touchY; return; }
-
-      const delta = secondTouchYRef.current - touchY;
-      const scrollEl =
-        container.closest('.schedule-timeline-list') ||
-        container.closest('.schedule-storage-list') ||
-        container.parentElement;
-      if (scrollEl) scrollEl.scrollTop += delta;
-      secondTouchYRef.current = touchY;
+      const t = Array.from(e.touches).find(t => t.identifier !== dragTouchIdRef.current);
+      if (t) scrollBy(t.clientY);
     };
-
-    const onReset = (e) => {
+    const onTouchReset = (e) => {
       if (e.touches.length < 2) secondTouchYRef.current = null;
       if (e.touches.length === 0) dragTouchIdRef.current = null;
     };
 
+    // ── Pointer Events (covers browsers where sortablejs uses PointerEvents) ──
+    const onDocPointerDown = (e) => {
+      if (e.pointerType !== 'touch') return;
+      if (e.isPrimary) return; // first finger = drag finger, don't interfere
+      if (!isDragActive()) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      secondTouchYRef.current = e.clientY;
+    };
+    const onDocPointerMove = (e) => {
+      if (e.pointerType !== 'touch' || e.isPrimary || !isDragActive()) return;
+      e.stopImmediatePropagation();
+      scrollBy(e.clientY);
+    };
+    const onPointerReset = (e) => {
+      if (e.pointerType !== 'touch') return;
+      if (e.isPrimary) dragTouchIdRef.current = null;
+      else secondTouchYRef.current = null;
+    };
+
     container.addEventListener('touchstart', onContainerTouchStart, { passive: true });
-    // passive:false required so stopImmediatePropagation() reliably blocks sortablejs
-    document.addEventListener('touchstart', onDocTouchStart, { capture: true, passive: false });
-    document.addEventListener('touchmove', onDocTouchMove, { capture: true, passive: false });
-    document.addEventListener('touchend', onReset, { passive: true });
-    document.addEventListener('touchcancel', onReset, { passive: true });
+    document.addEventListener('touchstart',  onDocTouchStart,  { capture: true, passive: false });
+    document.addEventListener('touchmove',   onDocTouchMove,   { capture: true, passive: false });
+    document.addEventListener('touchend',    onTouchReset,     { passive: true });
+    document.addEventListener('touchcancel', onTouchReset,     { passive: true });
+
+    document.addEventListener('pointerdown',   onDocPointerDown, { capture: true, passive: false });
+    document.addEventListener('pointermove',   onDocPointerMove, { capture: true, passive: false });
+    document.addEventListener('pointerup',     onPointerReset,   { passive: true });
+    document.addEventListener('pointercancel', onPointerReset,   { passive: true });
 
     return () => {
       container.removeEventListener('touchstart', onContainerTouchStart);
-      document.removeEventListener('touchstart', onDocTouchStart, { capture: true });
-      document.removeEventListener('touchmove', onDocTouchMove, { capture: true });
-      document.removeEventListener('touchend', onReset);
-      document.removeEventListener('touchcancel', onReset);
+      document.removeEventListener('touchstart',  onDocTouchStart,  { capture: true });
+      document.removeEventListener('touchmove',   onDocTouchMove,   { capture: true });
+      document.removeEventListener('touchend',    onTouchReset);
+      document.removeEventListener('touchcancel', onTouchReset);
+
+      document.removeEventListener('pointerdown',   onDocPointerDown, { capture: true });
+      document.removeEventListener('pointermove',   onDocPointerMove, { capture: true });
+      document.removeEventListener('pointerup',     onPointerReset);
+      document.removeEventListener('pointercancel', onPointerReset);
     };
   }, []);
 
