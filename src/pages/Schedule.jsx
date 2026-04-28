@@ -5,6 +5,20 @@ import SortableTimeline from '../components/SortableTimeline';
 import PlaceSearch from '../components/PlaceSearch';
 import ShareButton from '../components/ShareButton';
 
+// ── Mobile detection hook ─────────────────────────────────────────────────
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+};
+
 const buildScheduleShareText = (folder) => {
   if (!folder) return '';
   const lines = [];
@@ -40,6 +54,9 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
   const [routedDayIndex, setRoutedDayIndex] = useState(0);
   const [routeLegs, setRouteLegs] = useState([]);
   const [storageCategory, setStorageCategory] = useState('전체');
+  const [storagePage, setStoragePage] = useState(0);
+  const STORAGE_PAGE_SIZE = 5;
+  const isMobile = useIsMobile();
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const DEFAULT_FOLDER = {
@@ -211,6 +228,33 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
   };
 
   const handleRouteCalculated = (legs) => setRouteLegs(legs);
+
+  // Reset page when category changes
+  const handleStorageCategoryChange = (cat) => {
+    setStorageCategory(cat);
+    setStoragePage(0);
+  };
+
+  // Long press: add item to a specific day (clone)
+  const handleAddToDay = (item, day) => {
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== activeFolderId) return folder;
+        return {
+          ...folder,
+          days: (folder.days || []).map((d) => {
+            if (d.id !== day.id) return d;
+            const already = (d.items || []).some(
+              (i) => (i.googlePlaceId && i.googlePlaceId === item.googlePlaceId) || i.id === item.id
+            );
+            if (already) return d;
+            const cloned = { ...item, id: Date.now().toString() + Math.random().toString(36).substr(2, 5) };
+            return { ...d, items: [...(d.items || []), cloned] };
+          }),
+        };
+      })
+    );
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -398,7 +442,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
               {['전체', '관광명소', '맛집', '카페', '숙소', '기타'].map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => setStorageCategory(cat)}
+                  onClick={() => handleStorageCategoryChange(cat)}
                   style={{
                     padding: '10px 18px', borderRadius: '25px', border: '1px solid var(--color-border)',
                     background: storageCategory === cat ? 'var(--color-point)' : 'white',
@@ -412,23 +456,86 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
             </div>
 
             <div className="schedule-storage-list" style={{ flex: 1, overflowY: 'auto' }}>
-              <SortableTimeline
-                listId={storageCategory === '전체' ? '보관함' : `보관함 (${storageCategory})`}
-                items={
-                  storageCategory === '전체'
-                    ? activeFolderItems
-                    : activeFolderItems.filter(
-                        (item) => (item.category || '기타') === storageCategory
-                      )
-                }
-                setItems={handleActiveFolderItemsChange}
-                groupName="schedule"
-                onDelete={handleDeletePlace}
-                isCloneable={true}
-                scheduledPlaceIds={activeFolderDays.flatMap((day) =>
-                  (day.items || []).map((item) => item.googlePlaceId || item.name)
-                )}
-              />
+              {(() => {
+                const filteredItems = storageCategory === '전체'
+                  ? activeFolderItems
+                  : activeFolderItems.filter((item) => (item.category || '기타') === storageCategory);
+
+                // Pagination only on mobile
+                const totalPages = isMobile ? Math.ceil(filteredItems.length / STORAGE_PAGE_SIZE) : 1;
+                const safePage = isMobile ? Math.min(storagePage, Math.max(0, totalPages - 1)) : 0;
+                const pagedItems = isMobile
+                  ? filteredItems.slice(safePage * STORAGE_PAGE_SIZE, (safePage + 1) * STORAGE_PAGE_SIZE)
+                  : filteredItems;
+
+                return (
+                  <>
+                    <SortableTimeline
+                      listId={storageCategory === '전체' ? '보관함' : `보관함 (${storageCategory})`}
+                      items={pagedItems}
+                      setItems={(newItems) => {
+                        if (isMobile) {
+                          const before = filteredItems.slice(0, safePage * STORAGE_PAGE_SIZE);
+                          const after = filteredItems.slice((safePage + 1) * STORAGE_PAGE_SIZE);
+                          handleActiveFolderItemsChange([...before, ...newItems, ...after]);
+                        } else {
+                          handleActiveFolderItemsChange(newItems);
+                        }
+                      }}
+                      groupName="schedule"
+                      onDelete={handleDeletePlace}
+                      isCloneable={true}
+                      scheduledPlaceIds={activeFolderDays.flatMap((day) =>
+                        (day.items || []).map((item) => item.googlePlaceId || item.name)
+                      )}
+                      onLongPressItem={handleAddToDay}
+                      days={activeFolderDays}
+                    />
+
+                    {/* Pagination controls: mobile only */}
+                    {isMobile && totalPages > 1 && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '12px', marginTop: '12px', paddingTop: '12px',
+                        borderTop: '1px solid var(--color-border)',
+                      }}>
+                        <button
+                          onClick={() => setStoragePage((p) => Math.max(0, p - 1))}
+                          disabled={safePage === 0}
+                          style={{
+                            width: '32px', height: '32px', borderRadius: '50%',
+                            border: '1px solid var(--color-border)',
+                            background: safePage === 0 ? 'var(--color-bg)' : 'var(--color-point)',
+                            color: safePage === 0 ? 'var(--color-text-light)' : 'white',
+                            cursor: safePage === 0 ? 'default' : 'pointer',
+                            fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.2s',
+                          }}
+                        >‹</button>
+                        <span style={{ fontSize: '13px', color: 'var(--color-text-light)', fontWeight: 'bold' }}>
+                          {safePage + 1} / {totalPages}
+                          <span style={{ fontSize: '11px', marginLeft: '6px', opacity: 0.7 }}>
+                            ({filteredItems.length}개)
+                          </span>
+                        </span>
+                        <button
+                          onClick={() => setStoragePage((p) => Math.min(totalPages - 1, p + 1))}
+                          disabled={safePage >= totalPages - 1}
+                          style={{
+                            width: '32px', height: '32px', borderRadius: '50%',
+                            border: '1px solid var(--color-border)',
+                            background: safePage >= totalPages - 1 ? 'var(--color-bg)' : 'var(--color-point)',
+                            color: safePage >= totalPages - 1 ? 'var(--color-text-light)' : 'white',
+                            cursor: safePage >= totalPages - 1 ? 'default' : 'pointer',
+                            fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.2s',
+                          }}
+                        >›</button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

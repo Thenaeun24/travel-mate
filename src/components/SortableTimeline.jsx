@@ -1,8 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { ReactSortable } from 'react-sortablejs';
 
-const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [] }) => {
+// ── Mobile detection hook ─────────────────────────────────────────────────
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+};
+
+const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [], onLongPressItem, days = [] }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
+  const [dayPickerItem, setDayPickerItem] = useState(null);
+  const [dayPickerPos, setDayPickerPos] = useState({ x: 0, y: 0 });
+  const isMobile = useIsMobile();
+
+  // ── Long press logic (mobile only) ────────────────────────────────────────
+  const longPressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+
+  const startLongPress = useCallback((item, e) => {
+    if (!isCloneable || !isMobile) return;
+    longPressTriggered.current = false;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setDayPickerItem(item);
+      setDayPickerPos({ x: clientX, y: clientY });
+    }, 500);
+  }, [isCloneable, isMobile]);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleCardClick = useCallback((item, e) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    toggleExpand(item.id, e);
+  }, []);
+
+  const handleDaySelect = (day) => {
+    if (onLongPressItem && dayPickerItem) {
+      onLongPressItem(dayPickerItem, day);
+    }
+    setDayPickerItem(null);
+  };
 
   const getCategoryColor = (category) => {
     if (!category) return 'bg-green';
@@ -27,6 +82,83 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
     setExpandedItemId(prev => prev === id ? null : id);
   };
 
+  // ── Day picker overlay ──────────────────────────────────────────────────
+  const DayPickerOverlay = () => {
+    if (!dayPickerItem) return null;
+    // Position the popup near the touch point but keep it on screen
+    const popupW = 200;
+    const popupMaxH = 320;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = dayPickerPos.x - popupW / 2;
+    let top = dayPickerPos.y + 12;
+    if (left < 8) left = 8;
+    if (left + popupW > vw - 8) left = vw - popupW - 8;
+    if (top + popupMaxH > vh - 8) top = dayPickerPos.y - popupMaxH - 12;
+
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          onClick={() => setDayPickerItem(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9000,
+            background: 'rgba(0,0,0,0.25)',
+          }}
+        />
+        {/* Popup */}
+        <div style={{
+          position: 'fixed',
+          left, top,
+          width: popupW,
+          background: 'white',
+          borderRadius: '16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+          zIndex: 9001,
+          overflow: 'hidden',
+          animation: 'fadeInUp 0.18s ease',
+        }}>
+          <div style={{ padding: '12px 16px 8px', borderBottom: '1px solid #f0f0f0' }}>
+            <div style={{ fontSize: '12px', color: '#888', marginBottom: '2px' }}>📍 {dayPickerItem.name}</div>
+            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>어느 날에 추가할까요?</div>
+          </div>
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            {days.length > 0 ? days.map((day, idx) => (
+              <button
+                key={day.id}
+                onClick={() => handleDaySelect(day)}
+                style={{
+                  display: 'block', width: '100%', padding: '12px 16px',
+                  border: 'none', background: 'none', textAlign: 'left',
+                  fontSize: '14px', cursor: 'pointer', color: '#333',
+                  borderBottom: idx < days.length - 1 ? '1px solid #f5f5f5' : 'none',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f8f4ff'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+              >
+                📅 {day.title || `Day ${idx + 1}`}
+              </button>
+            )) : (
+              <div style={{ padding: '16px', color: '#aaa', fontSize: '13px', textAlign: 'center' }}>등록된 Day가 없어요</div>
+            )}
+          </div>
+          <button
+            onClick={() => setDayPickerItem(null)}
+            style={{
+              display: 'block', width: '100%', padding: '12px',
+              border: 'none', borderTop: '1px solid #f0f0f0',
+              background: '#fafafa', color: '#999', fontSize: '13px',
+              cursor: 'pointer', fontWeight: 'bold',
+            }}
+          >
+            취소
+          </button>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div
       className="timeline-container"
@@ -38,6 +170,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         border: '1px dashed var(--color-border)'
       }}
     >
+      <DayPickerOverlay />
       <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--color-text-light)' }}>{listId}</h3>
       <ReactSortable
         list={items}
@@ -69,7 +202,14 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
             <div 
               className="card"
               style={{ margin: '8px 0', cursor: 'grab', padding: '0', overflow: 'hidden', position: 'relative', zIndex: 1 }}
-              onClick={(e) => toggleExpand(item.id, e)}
+              onClick={(e) => handleCardClick(item, e)}
+              onMouseDown={(e) => { if (isMobile) startLongPress(item, e); }}
+              onMouseUp={() => { if (isMobile) cancelLongPress(); }}
+              onMouseLeave={() => { if (isMobile) cancelLongPress(); }}
+              onTouchStart={(e) => startLongPress(item, e)}
+              onTouchEnd={cancelLongPress}
+              onTouchCancel={cancelLongPress}
+              onContextMenu={(e) => { if (isCloneable && isMobile) e.preventDefault(); }}
             >
               {/* Header section */}
               <div style={{ padding: '12px', display: 'flex', alignItems: 'center' }}>
