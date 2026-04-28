@@ -24,12 +24,14 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   // ── Long press logic (mobile only) ────────────────────────────────────────
   const longPressTimer = useRef(null);
   const longPressTriggered = useRef(false);
+  const touchStartPos = useRef({ x: 0, y: 0 });
 
   const startLongPress = useCallback((item, e) => {
     if (!isCloneable || !isMobile) return;
     longPressTriggered.current = false;
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    touchStartPos.current = { x: clientX, y: clientY };
     longPressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
       setDayPickerItem(item);
@@ -43,6 +45,17 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       longPressTimer.current = null;
     }
   }, []);
+
+  // 드래그 중이면 롱프레스 취소 (10px 이상 움직이면 드래그로 판단)
+  const handleTouchMove = useCallback((e) => {
+    if (!longPressTimer.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartPos.current.x;
+    const dy = touch.clientY - touchStartPos.current.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) {
+      cancelLongPress();
+    }
+  }, [cancelLongPress]);
 
   const handleCardClick = useCallback((item, e) => {
     if (longPressTriggered.current) {
@@ -207,6 +220,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
               onMouseUp={() => { if (isMobile) cancelLongPress(); }}
               onMouseLeave={() => { if (isMobile) cancelLongPress(); }}
               onTouchStart={(e) => startLongPress(item, e)}
+              onTouchMove={handleTouchMove}
               onTouchEnd={cancelLongPress}
               onTouchCancel={cancelLongPress}
               onContextMenu={(e) => { if (isCloneable && isMobile) e.preventDefault(); }}
