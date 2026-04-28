@@ -1,0 +1,7 @@
+You must strictly follow these rules to prevent API billing bombs:
+
+Never call paid APIs (like Google Maps) automatically inside useEffect on initial load unless explicitly requested.
+
+Prefer user-triggered actions (onClick) for external API calls.
+
+Always be extremely careful with React state updates to avoid infinite re-rendering loops.
