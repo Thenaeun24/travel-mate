@@ -202,6 +202,8 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         scroll={true}
         scrollSensitivity={50}
         ghostClass="sortable-ghost"
+        filter="textarea, input, select"
+        preventOnFilter={false}
         style={{ minHeight: '80px' }}
       >
         {items.map((item, index) => {
