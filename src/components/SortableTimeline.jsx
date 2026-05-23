@@ -344,7 +344,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
                       placeholder="주문 메뉴, 예약 번호 등 기록..."
                       value={item.memo || ''}
                       onChange={(e) => updateItem(item.id, 'memo', e.target.value)}
-                      style={{ padding: '8px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12px', resize: 'vertical', minHeight: '50px', fontFamily: 'inherit' }}
+                      style={{ padding: '8px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12px', resize: 'vertical', minHeight: '150px', fontFamily: 'inherit' }}
                     />
                   </div>
                   
