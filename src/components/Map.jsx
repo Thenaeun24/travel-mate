@@ -48,10 +48,20 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
 
   // Track marker count to fit bounds only when needed
   const lastMarkerCountRef = useRef(0);
+  // Coord signature guards prevent re-creating markers / re-calling Directions API
+  // when parent re-renders with a new array reference but identical coordinates.
+  const lastStorageSignatureRef = useRef('');
+  const lastRouteSignatureRef = useRef('');
 
   // Effect to handle storage markers
   useEffect(() => {
     if (!map || !window.google) return;
+
+    const storageSignature = storageMarkers
+      .map(p => `${p.lat},${p.lng},${p.name || ''}`)
+      .join('|');
+    if (storageSignature === lastStorageSignatureRef.current) return;
+    lastStorageSignatureRef.current = storageSignature;
 
     // Clear old storage markers
     markersRef.current.forEach(m => m.setMap(null));
@@ -82,6 +92,12 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
   // Effect to handle routing
   useEffect(() => {
     if (!map || !window.google || !directionsServiceRef.current || !directionsRendererRef.current) return;
+
+    const routeSignature = routeMarkers
+      .map(p => `${p.lat},${p.lng}`)
+      .join('|');
+    if (routeSignature === lastRouteSignatureRef.current) return;
+    lastRouteSignatureRef.current = routeSignature;
 
     if (routeMarkers.length >= 2) {
       const origin = { lat: routeMarkers[0].lat, lng: routeMarkers[0].lng };

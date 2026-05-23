@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ReactSortable } from 'react-sortablejs';
 import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
@@ -72,16 +72,21 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
 
   const activeFolderDays = activeFolder.days || [];
   const activeFolderItems = activeFolder.items || [];
-  const routeMarkers = activeFolderDays[routedDayIndex]?.items || [];
-  const routePlaceIds = new Set(
-    routeMarkers.map((m) => m.googlePlaceId || m.name)
+  const routeMarkers = useMemo(
+    () => activeFolderDays[routedDayIndex]?.items || [],
+    [activeFolderDays, routedDayIndex]
   );
-  const storageAndOtherMarkers = [
-    ...activeFolderItems,
-    ...activeFolderDays
-      .filter((_, idx) => idx !== routedDayIndex)
-      .flatMap((d) => d.items || []),
-  ].filter((m) => !routePlaceIds.has(m.googlePlaceId || m.name));
+  const storageAndOtherMarkers = useMemo(() => {
+    const routePlaceIds = new Set(
+      routeMarkers.map((m) => m.googlePlaceId || m.name)
+    );
+    return [
+      ...activeFolderItems,
+      ...activeFolderDays
+        .filter((_, idx) => idx !== routedDayIndex)
+        .flatMap((d) => d.items || []),
+    ].filter((m) => !routePlaceIds.has(m.googlePlaceId || m.name));
+  }, [activeFolderItems, activeFolderDays, routedDayIndex, routeMarkers]);
 
   // ── Event handlers ─────────────────────────────────────────────────────────
   const handleAddPlace = (newPlace) => {
@@ -128,7 +133,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
     );
   };
 
-  const handleDayItemsChange = (dayId, newItems) => {
+  const handleDayItemsChange = useCallback((dayId, newItems) => {
     setFolders((prev) =>
       prev.map((folder) => {
         if (folder.id === activeFolderId) {
@@ -142,7 +147,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
         return folder;
       })
     );
-  };
+  }, [activeFolderId, setFolders]);
 
   const handleAddFolder = () => {
     if (newFolderName.trim()) {
@@ -207,7 +212,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
     );
   };
 
-  const handleRouteOptimized = (optimizedOrderIndices) => {
+  const handleRouteOptimized = useCallback((optimizedOrderIndices) => {
     const currentDay = activeFolderDays[routedDayIndex];
     const currentItems = currentDay?.items || [];
     if (
@@ -225,9 +230,9 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
       );
       if (isChanged) handleDayItemsChange(currentDay.id, optimizedItems);
     }
-  };
+  }, [activeFolderDays, routedDayIndex, handleDayItemsChange]);
 
-  const handleRouteCalculated = (legs) => setRouteLegs(legs);
+  const handleRouteCalculated = useCallback((legs) => setRouteLegs(legs), []);
 
   // Reset page when category changes
   const handleStorageCategoryChange = (cat) => {
