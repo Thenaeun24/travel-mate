@@ -361,7 +361,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
       <div className="schedule-main" style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--color-bg)' }}>
 
         {/* LEFT: Map + Timeline */}
-        <div className="schedule-col-left" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)' }}>
+        <div className="schedule-col-left" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--color-border)' }}>
 
           <div className="schedule-map" style={{ flex: '0 0 38%', position: 'relative', borderBottom: '1px solid var(--color-border)' }}>
             <Map
@@ -373,8 +373,8 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
             />
           </div>
 
-          <div className="schedule-timeline-wrap" style={{ flex: '0 0 62%', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
-            <div className="schedule-timeline-card" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="schedule-timeline-wrap" style={{ flex: '0 0 62%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, padding: '16px' }}>
+            <div className="schedule-timeline-card" style={{ background: 'var(--color-card)', borderRadius: '15px', padding: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '15px', overflowX: 'auto', whiteSpace: 'nowrap', marginBottom: '15px' }}>
                 <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--color-text)' }}>🗓️ 일정:</div>
@@ -403,7 +403,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
               </div>
 
               {activeFolderDays[routedDayIndex] && (
-                <div className="schedule-timeline-day" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="schedule-timeline-day" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                     <h2 style={{ fontSize: '20px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
                       📍 {activeFolderDays[routedDayIndex].title}
