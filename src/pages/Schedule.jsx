@@ -263,7 +263,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="schedule-page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div className="schedule-page" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* Folder / Country Bar */}
       <div className="flex-row schedule-folder-bar" style={{
