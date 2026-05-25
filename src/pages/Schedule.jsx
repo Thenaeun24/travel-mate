@@ -4,6 +4,8 @@ import Map from '../components/Map';
 import SortableTimeline from '../components/SortableTimeline';
 import PlaceSearch from '../components/PlaceSearch';
 import ShareButton from '../components/ShareButton';
+import { useExchangeRates } from '../hooks/useExchangeRates';
+import { DEFAULT_CURRENCY } from '../constants/currencies';
 
 // ── Mobile detection hook ─────────────────────────────────────────────────
 const useIsMobile = () => {
@@ -62,7 +64,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
   const DEFAULT_FOLDER = {
     id: 'f1', name: '일본 오사카',
     items: [], days: [{ id: 'day1', title: 'Day 1', items: [] }, { id: 'day2', title: 'Day 2', items: [] }],
-    expenses: [],
+    expenses: [], currency: DEFAULT_CURRENCY,
   };
 
   const activeFolder =
@@ -72,6 +74,9 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
 
   const activeFolderDays = activeFolder.days || [];
   const activeFolderItems = activeFolder.items || [];
+
+  const baseCurrency = activeFolder.currency || DEFAULT_CURRENCY;
+  const { rateToKRW } = useExchangeRates(baseCurrency);
   const routeMarkers = useMemo(
     () => activeFolderDays[routedDayIndex]?.items || [],
     [activeFolderDays, routedDayIndex]
@@ -160,6 +165,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
           { id: 'day2', title: 'Day 2', items: [] },
         ],
         expenses: [],
+        currency: DEFAULT_CURRENCY,
       };
       setFolders((prev) => [...prev, newFolder]);
       setActiveFolderId(newFolder.id);
@@ -424,6 +430,8 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                       groupName="schedule"
                       onDelete={handleDeletePlace}
                       routeLegs={routeLegs}
+                      baseCurrency={baseCurrency}
+                      rateToKRW={rateToKRW}
                     />
                   </div>
                 </div>
@@ -495,6 +503,8 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                       )}
                       onLongPressItem={handleAddToDay}
                       days={activeFolderDays}
+                      baseCurrency={baseCurrency}
+                      rateToKRW={rateToKRW}
                     />
 
                     {/* Pagination controls: mobile only */}

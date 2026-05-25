@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { ReactSortable } from 'react-sortablejs';
+import { currencySymbol } from '../constants/currencies';
 
 // ── Mobile detection hook ─────────────────────────────────────────────────
 const useIsMobile = () => {
@@ -15,7 +16,7 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [], onLongPressItem, days = [] }) => {
+const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [], onLongPressItem, days = [], baseCurrency = 'JPY', rateToKRW = null }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [dayPickerItem, setDayPickerItem] = useState(null);
   const [dayPickerPos, setDayPickerPos] = useState({ x: 0, y: 0 });
@@ -296,17 +297,19 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
 
                   {/* Budget */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--color-text-light)', width: '60px' }}>예산(현지)</span>
-                    <input 
-                      type="number" 
+                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--color-text-light)', width: '60px' }}>
+                      예산({currencySymbol(baseCurrency)})
+                    </span>
+                    <input
+                      type="number"
                       placeholder="금액 입력"
                       value={item.budget || ''}
                       onChange={(e) => updateItem(item.id, 'budget', e.target.value)}
                       style={{ padding: '6px', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '12px', flex: 1 }}
                     />
-                    {item.budget && (
+                    {item.budget && rateToKRW && baseCurrency !== 'KRW' && (
                       <span style={{ fontSize: '11px', color: 'var(--color-point)', width: '60px', textAlign: 'right' }}>
-                        ≒ {(item.budget * 9.0).toLocaleString()}원
+                        ≒ {Math.round(item.budget * rateToKRW).toLocaleString()}원
                       </span>
                     )}
                   </div>

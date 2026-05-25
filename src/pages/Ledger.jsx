@@ -1,40 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ShareButton from '../components/ShareButton';
+import { useExchangeRates } from '../hooks/useExchangeRates';
+import { CURRENCIES, DEFAULT_CURRENCY, currencySymbol } from '../constants/currencies';
 
-const buildLedgerShareText = (folder, exchangeRate) => {
+const buildLedgerShareText = (folder, baseCurrency, toBase, toKRW) => {
   if (!folder) return '';
+  const sym = currencySymbol(baseCurrency);
   const expenses = folder.expenses || [];
   const allItems = [
     ...(folder.items || []),
     ...(folder.days || []).flatMap((d) => d.items || []),
   ];
   const totalBudget = allItems.reduce((s, i) => s + Number(i.budget || 0), 0);
-  const totalExp = expenses.reduce((s, e) => {
-    const amt = Number(e.amount || 0);
-    return s + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
-  }, 0);
+  const totalExp = expenses.reduce((s, e) => s + toBase(e.amount, e.currency), 0);
   const remaining = totalBudget - totalExp;
   const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+  const krwLine = (amtBase) => {
+    const krw = toKRW(amtBase);
+    return krw == null ? '' : ` (₩${fmt(krw)})`;
+  };
 
   const expByCat = {};
   expenses.forEach((e) => {
     const cat = e.category || '기타';
-    const amt = Number(e.amount || 0);
-    expByCat[cat] = (expByCat[cat] || 0) + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
+    expByCat[cat] = (expByCat[cat] || 0) + toBase(e.amount, e.currency);
   });
 
   const lines = [];
   lines.push(`💰 ${folder.name} 가계부`);
   lines.push('');
-  lines.push(`총 예산: ¥${fmt(totalBudget)}`);
-  lines.push(`총 지출: ¥${fmt(totalExp)}`);
-  lines.push(`잔액: ${remaining < 0 ? '-' : ''}¥${fmt(Math.abs(remaining))}`);
+  lines.push(`총 예산: ${sym}${fmt(totalBudget)}${krwLine(totalBudget)}`);
+  lines.push(`총 지출: ${sym}${fmt(totalExp)}${krwLine(totalExp)}`);
+  lines.push(`잔액: ${remaining < 0 ? '-' : ''}${sym}${fmt(Math.abs(remaining))}`);
 
   if (Object.keys(expByCat).length > 0) {
     lines.push('');
     lines.push('카테고리별 지출:');
     Object.entries(expByCat).forEach(([cat, amt]) => {
-      lines.push(`- ${cat}: ¥${fmt(amt)}`);
+      lines.push(`- ${cat}: ${sym}${fmt(amt)}`);
     });
   }
 
@@ -42,8 +45,7 @@ const buildLedgerShareText = (folder, exchangeRate) => {
     lines.push('');
     lines.push(`지출 내역 (${expenses.length}건):`);
     [...expenses].slice(-10).reverse().forEach((e) => {
-      const sym = e.currency === 'JPY' ? '¥' : e.currency === 'KRW' ? '₩' : e.currency === 'USD' ? '$' : '€';
-      lines.push(`- ${e.date} ${e.description} ${sym}${Number(e.amount).toLocaleString('ko-KR')}`);
+      lines.push(`- ${e.date} ${e.description} ${currencySymbol(e.currency)}${Number(e.amount).toLocaleString('ko-KR')}`);
     });
   }
 
@@ -70,18 +72,17 @@ const EXPENSE_CAT_COLORS = {
 
 const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   const [activeTab, setActiveTab] = useState('budget');
-  const [exchangeRate, setExchangeRate] = useState(null);
-  const [rateLoading, setRateLoading] = useState(true);
-  const [currency, setCurrency] = useState('JPY');
-
-  // Expense form state
-  const [expForm, setExpForm] = useState({
-    description: '', amount: '', category: '식비', currency: 'JPY', date: new Date().toISOString().slice(0, 10),
-  });
-  const [showForm, setShowForm] = useState(false);
 
   const activeFolder = folders?.find((f) => f.id === activeFolderId) || folders?.[0];
+  const baseCurrency = activeFolder?.currency || DEFAULT_CURRENCY;
+  const baseSym = currencySymbol(baseCurrency);
   const expenses = activeFolder?.expenses || [];
+
+  // Expense form state — defaults to the trip's base currency
+  const [expForm, setExpForm] = useState({
+    description: '', amount: '', category: '식비', currency: baseCurrency, date: new Date().toISOString().slice(0, 10),
+  });
+  const [showForm, setShowForm] = useState(false);
 
   // All scheduled items (from days) with budget
   const allItems = [
@@ -90,32 +91,22 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   ];
   const budgetItems = allItems.filter((item) => item.budget && Number(item.budget) > 0);
 
-  // ── Fetch exchange rate ───────────────────────────────────────────────────
-  useEffect(() => {
-    setRateLoading(true);
-    fetch('https://open.er-api.com/v6/latest/JPY')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.rates?.KRW) setExchangeRate(data.rates.KRW);
-      })
-      .catch(() => setExchangeRate(null))
-      .finally(() => setRateLoading(false));
-  }, []);
-
-  const toKRW = (amountJPY) => {
-    if (!exchangeRate) return null;
-    return Math.round(amountJPY * exchangeRate);
-  };
+  // ── Exchange rates (base currency → others) ───────────────────────────────
+  const { rateToKRW, loading: rateLoading, toBase, toKRW } = useExchangeRates(baseCurrency);
 
   const fmt = (num) => num?.toLocaleString('ko-KR') ?? '—';
 
-  // ── Budget calculations ───────────────────────────────────────────────────
-  const totalBudgetJPY = budgetItems.reduce((s, i) => s + Number(i.budget || 0), 0);
-  const totalExpensesJPY = expenses.reduce((s, e) => {
-    const amt = Number(e.amount || 0);
-    return s + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
-  }, 0);
-  const remaining = totalBudgetJPY - totalExpensesJPY;
+  const setBaseCurrency = (code) => {
+    setFolders((prev) =>
+      prev.map((folder) => (folder.id === activeFolderId ? { ...folder, currency: code } : folder))
+    );
+    setExpForm((f) => ({ ...f, currency: code }));
+  };
+
+  // ── Budget calculations (all in base currency) ────────────────────────────
+  const totalBudget = budgetItems.reduce((s, i) => s + Number(i.budget || 0), 0);
+  const totalExpenses = expenses.reduce((s, e) => s + toBase(e.amount, e.currency), 0);
+  const remaining = totalBudget - totalExpenses;
 
   const budgetByCategory = {};
   budgetItems.forEach((item) => {
@@ -126,8 +117,7 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   const expByCategory = {};
   expenses.forEach((e) => {
     const cat = e.category || '기타';
-    const amt = Number(e.amount || 0);
-    expByCategory[cat] = (expByCategory[cat] || 0) + (e.currency === 'KRW' && exchangeRate ? amt / exchangeRate : amt);
+    expByCategory[cat] = (expByCategory[cat] || 0) + toBase(e.amount, e.currency);
   });
 
   // ── Expense handlers ──────────────────────────────────────────────────────
@@ -146,7 +136,7 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
           : folder
       )
     );
-    setExpForm({ description: '', amount: '', category: '식비', currency: 'JPY', date: new Date().toISOString().slice(0, 10) });
+    setExpForm({ description: '', amount: '', category: '식비', currency: baseCurrency, date: new Date().toISOString().slice(0, 10) });
     setShowForm(false);
   };
 
@@ -220,20 +210,32 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
             label="가계부 공유"
             getShareData={() => ({
               title: `${activeFolder?.name || ''} 가계부`,
-              text: buildLedgerShareText(activeFolder, exchangeRate),
+              text: buildLedgerShareText(activeFolder, baseCurrency, toBase, toKRW),
             })}
           />
         </div>
       </div>
 
-      {/* Exchange rate bar */}
+      {/* Exchange rate bar + trip currency selector */}
       <div style={s.rateBar}>
         <span>💱</span>
+        <select
+          value={baseCurrency}
+          onChange={(e) => setBaseCurrency(e.target.value)}
+          style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '4px 6px', fontSize: '13px', background: 'white', cursor: 'pointer' }}
+          aria-label="여행 통화"
+        >
+          {CURRENCIES.map((c) => (
+            <option key={c.code} value={c.code}>{c.flag} {c.symbol} {c.label} ({c.code})</option>
+          ))}
+        </select>
         {rateLoading
           ? <span>환율 불러오는 중...</span>
-          : exchangeRate
-            ? <span><b>JPY 100</b> = <b style={{ color: '#333' }}>₩ {fmt(Math.round(exchangeRate * 100))}</b> <span style={{ fontSize: '11px' }}>(실시간)</span></span>
-            : <span style={{ color: '#f5a623' }}>환율 불러오기 실패 (오프라인)</span>
+          : baseCurrency === 'KRW'
+            ? <span><b>기준 통화: 원(KRW)</b></span>
+            : rateToKRW
+              ? <span><b>{baseCurrency} 100</b> = <b style={{ color: '#333' }}>₩ {fmt(Math.round(rateToKRW * 100))}</b> <span style={{ fontSize: '11px' }}>(실시간)</span></span>
+              : <span style={{ color: '#f5a623' }}>환율 불러오기 실패 (오프라인)</span>
         }
       </div>
 
@@ -250,32 +252,32 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
           <div style={s.summaryGrid}>
             <div style={s.summaryCard('#A3CCDA')}>
               <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginBottom: '4px' }}>총 예산</div>
-              <div style={{ fontWeight: '800', fontSize: '17px' }}>¥{fmt(Math.round(totalBudgetJPY))}</div>
-              {exchangeRate && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalBudgetJPY))}</div>}
+              <div style={{ fontWeight: '800', fontSize: '17px' }}>{baseSym}{fmt(Math.round(totalBudget))}</div>
+              {rateToKRW && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalBudget))}</div>}
             </div>
             <div style={s.summaryCard('#F5D2D2')}>
               <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginBottom: '4px' }}>총 지출</div>
-              <div style={{ fontWeight: '800', fontSize: '17px', color: totalExpensesJPY > totalBudgetJPY ? '#ff4d4f' : '#333' }}>¥{fmt(Math.round(totalExpensesJPY))}</div>
-              {exchangeRate && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalExpensesJPY))}</div>}
+              <div style={{ fontWeight: '800', fontSize: '17px', color: totalExpenses > totalBudget ? '#ff4d4f' : '#333' }}>{baseSym}{fmt(Math.round(totalExpenses))}</div>
+              {rateToKRW && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalExpenses))}</div>}
             </div>
             <div style={s.summaryCard(remaining >= 0 ? '#BDE3C3' : '#ffccc7')}>
               <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginBottom: '4px' }}>잔액</div>
               <div style={{ fontWeight: '800', fontSize: '17px', color: remaining >= 0 ? '#52c41a' : '#ff4d4f' }}>
-                {remaining >= 0 ? '' : '-'}¥{fmt(Math.abs(Math.round(remaining)))}
+                {remaining >= 0 ? '' : '-'}{baseSym}{fmt(Math.abs(Math.round(remaining)))}
               </div>
-              {exchangeRate && <div style={{ fontSize: '11px', color: remaining >= 0 ? '#52c41a' : '#ff4d4f', marginTop: '2px' }}>₩{fmt(Math.abs(toKRW(remaining)))}</div>}
+              {rateToKRW && <div style={{ fontSize: '11px', color: remaining >= 0 ? '#52c41a' : '#ff4d4f', marginTop: '2px' }}>₩{fmt(Math.abs(toKRW(remaining)))}</div>}
             </div>
           </div>
 
           {/* Progress bar */}
-          {totalBudgetJPY > 0 && (
+          {totalBudget > 0 && (
             <div style={{ ...s.card, marginBottom: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                 <span style={{ fontSize: '13px', fontWeight: '600' }}>지출 현황</span>
-                <span style={{ fontSize: '13px', color: 'var(--color-text-light)' }}>{Math.round((totalExpensesJPY / totalBudgetJPY) * 100)}%</span>
+                <span style={{ fontSize: '13px', color: 'var(--color-text-light)' }}>{Math.round((totalExpenses / totalBudget) * 100)}%</span>
               </div>
               <div style={s.progressBar()}>
-                <div style={s.progressFill((totalExpensesJPY / totalBudgetJPY) * 100, totalExpensesJPY > totalBudgetJPY ? '#ff4d4f' : '#A3CCDA')} />
+                <div style={s.progressFill((totalExpenses / totalBudget) * 100, totalExpenses > totalBudget ? '#ff4d4f' : '#A3CCDA')} />
               </div>
             </div>
           )}
@@ -298,9 +300,9 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
                         <span style={s.badge(CATEGORY_COLORS[cat] || '#eee')}>{cat}</span>
                       </div>
                       <div style={{ fontSize: '13px', textAlign: 'right' }}>
-                        <span style={{ color: 'var(--color-text-light)' }}>¥{fmt(Math.round(exp))}</span>
+                        <span style={{ color: 'var(--color-text-light)' }}>{baseSym}{fmt(Math.round(exp))}</span>
                         <span style={{ color: '#ccc', margin: '0 4px' }}>/</span>
-                        <span style={{ fontWeight: '600' }}>¥{fmt(Math.round(amt))}</span>
+                        <span style={{ fontWeight: '600' }}>{baseSym}{fmt(Math.round(amt))}</span>
                       </div>
                     </div>
                     <div style={s.progressBar()}>
@@ -323,8 +325,8 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
                     <span style={{ fontSize: '14px' }}>{item.name}</span>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: '700' }}>¥{fmt(Number(item.budget))}</div>
-                    {exchangeRate && <div style={{ fontSize: '11px', color: 'var(--color-text-light)' }}>₩{fmt(toKRW(Number(item.budget)))}</div>}
+                    <div style={{ fontWeight: '700' }}>{baseSym}{fmt(Number(item.budget))}</div>
+                    {rateToKRW && <div style={{ fontSize: '11px', color: 'var(--color-text-light)' }}>₩{fmt(toKRW(Number(item.budget)))}</div>}
                   </div>
                 </div>
               ))}
@@ -337,7 +339,15 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
       {activeTab === 'expenses' && (
         <>
           {/* Add button */}
-          <button style={s.addBtn} onClick={() => setShowForm((v) => !v)}>
+          <button
+            style={s.addBtn}
+            onClick={() => {
+              setShowForm((v) => {
+                if (!v) setExpForm((f) => ({ ...f, currency: baseCurrency }));
+                return !v;
+              });
+            }}
+          >
             {showForm ? '✕ 취소' : '+ 지출 추가'}
           </button>
 
@@ -360,10 +370,9 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
                   value={expForm.currency}
                   onChange={(e) => setExpForm((f) => ({ ...f, currency: e.target.value }))}
                 >
-                  <option value="JPY">¥ 엔 (JPY)</option>
-                  <option value="KRW">₩ 원 (KRW)</option>
-                  <option value="USD">$ 달러 (USD)</option>
-                  <option value="EUR">€ 유로 (EUR)</option>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>{c.symbol} {c.label} ({c.code})</option>
+                  ))}
                 </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
@@ -393,13 +402,13 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
           <div style={s.summaryGrid}>
             <div style={s.summaryCard('#F5D2D2')}>
               <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginBottom: '4px' }}>총 지출</div>
-              <div style={{ fontWeight: '800', fontSize: '17px' }}>¥{fmt(Math.round(totalExpensesJPY))}</div>
-              {exchangeRate && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalExpensesJPY))}</div>}
+              <div style={{ fontWeight: '800', fontSize: '17px' }}>{baseSym}{fmt(Math.round(totalExpenses))}</div>
+              {rateToKRW && <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginTop: '2px' }}>₩{fmt(toKRW(totalExpenses))}</div>}
             </div>
             <div style={s.summaryCard('#A3CCDA')}>
               <div style={{ fontSize: '11px', color: 'var(--color-text-light)', marginBottom: '4px' }}>잔액</div>
               <div style={{ fontWeight: '800', fontSize: '17px', color: remaining >= 0 ? '#52c41a' : '#ff4d4f' }}>
-                {remaining >= 0 ? '' : '-'}¥{fmt(Math.abs(Math.round(remaining)))}
+                {remaining >= 0 ? '' : '-'}{baseSym}{fmt(Math.abs(Math.round(remaining)))}
               </div>
             </div>
             <div style={s.summaryCard('#F8F7BA')}>
@@ -415,7 +424,7 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
               {Object.entries(expByCategory).map(([cat, amt]) => (
                 <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <span style={s.badge(EXPENSE_CAT_COLORS[cat] || '#eee')}>{cat}</span>
-                  <span style={{ fontWeight: '600', fontSize: '14px' }}>¥{fmt(Math.round(amt))}</span>
+                  <span style={{ fontWeight: '600', fontSize: '14px' }}>{baseSym}{fmt(Math.round(amt))}</span>
                 </div>
               ))}
             </div>
@@ -430,7 +439,7 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
               </div>
             ) : (
               [...expenses].reverse().map((e) => {
-                const amtJPY = e.currency === 'KRW' && exchangeRate ? e.amount / exchangeRate : e.amount;
+                const amtBase = toBase(e.amount, e.currency);
                 return (
                   <div key={e.id} style={s.expRow}>
                     <div style={{ flex: 1 }}>
@@ -442,12 +451,12 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
                     </div>
                     <div style={{ textAlign: 'right', marginRight: '8px' }}>
                       <div style={{ fontWeight: '700', fontSize: '15px' }}>
-                        {e.currency === 'JPY' ? '¥' : e.currency === 'KRW' ? '₩' : '$'}{fmt(e.amount)}
+                        {currencySymbol(e.currency)}{fmt(e.amount)}
                       </div>
-                      {exchangeRate && e.currency !== 'JPY' && (
-                        <div style={{ fontSize: '11px', color: 'var(--color-text-light)' }}>≈ ¥{fmt(Math.round(amtJPY))}</div>
+                      {e.currency !== baseCurrency && (
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-light)' }}>≈ {baseSym}{fmt(Math.round(amtBase))}</div>
                       )}
-                      {exchangeRate && e.currency === 'JPY' && (
+                      {e.currency === baseCurrency && rateToKRW && baseCurrency !== 'KRW' && (
                         <div style={{ fontSize: '11px', color: 'var(--color-text-light)' }}>₩{fmt(toKRW(e.amount))}</div>
                       )}
                     </div>
