@@ -112,7 +112,9 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
         origin,
         destination,
         waypoints,
-        optimizeWaypoints: true,
+        // 사용자가 정한 일정 순서를 그대로 따른다. true로 두면 구글이 거리순으로
+        // 재정렬한 결과가 일정 순서를 덮어써, 수동으로 순서를 바꿀 수 없게 된다.
+        optimizeWaypoints: false,
         travelMode: window.google.maps.TravelMode.WALKING // or DRIVING
       }, (response, status) => {
         if (status === 'OK') {
