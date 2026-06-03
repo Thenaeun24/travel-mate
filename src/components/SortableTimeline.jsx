@@ -25,12 +25,14 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   // ── 중복/누락 id 자가 치유 ────────────────────────────────────────────────
   // react-sortablejs와 React key는 항목마다 고유 id를 요구한다. id가 겹치면
   // 두 카드가 한 덩어리처럼 묶여 순서가 안 바뀌거나 같은 내용으로 복제된다.
-  // 어떤 경로로 들어온 데이터든 렌더 직전에 보정하고 상위로 전파한다.
-  useEffect(() => {
+  // 첫 페인트부터 깨지지 않도록 렌더 시점에 동기적으로 보정한 목록을 쓰고,
+  // 보정이 일어났다면 effect에서 상위 상태로 전파해 영구 저장한다.
+  const dedupeIds = (arr) => {
     const seen = new Set();
     let changed = false;
-    const fixed = items.map((it) => {
-      if (it.id == null || it.id === '' || seen.has(it.id)) {
+    const fixed = arr.map((it) => {
+      const id = it && it.id;
+      if (id == null || id === '' || seen.has(id)) {
         changed = true;
         let nid;
         do {
@@ -39,12 +41,16 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         seen.add(nid);
         return { ...it, id: nid };
       }
-      seen.add(it.id);
+      seen.add(id);
       return it;
     });
-    if (changed) setItems(fixed);
+    return { fixed, changed };
+  };
+  const { fixed: safeItems, changed: idsFixed } = dedupeIds(items);
+  useEffect(() => {
+    if (idsFixed) setItems(safeItems);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  }, [idsFixed]);
 
   // ── Long press logic (mobile only) ────────────────────────────────────────
   const longPressTimer = useRef(null);
@@ -211,14 +217,14 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       <DayPickerOverlay />
       <h3 style={{ fontSize: '14px', marginBottom: '8px', color: 'var(--color-text-light)' }}>{listId}</h3>
       <ReactSortable
-        list={items}
+        list={safeItems}
         setList={(newList) => {
           // ReactSortable calls setList on mount and on every render.
           // id 문자열 비교는 항목 id가 중복되면 순서 변경을 놓치므로,
           // 객체 참조로 실제 순서/구성이 바뀌었을 때만 반영한다.
           const changed =
-            newList.length !== items.length ||
-            newList.some((it, i) => it !== items[i]);
+            newList.length !== safeItems.length ||
+            newList.some((it, i) => it !== safeItems[i]);
           if (changed) {
             setItems(newList);
           }
@@ -237,7 +243,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         preventOnFilter={false}
         style={{ minHeight: '80px' }}
       >
-        {items.map((item, index) => {
+        {safeItems.map((item, index) => {
           const isRoute = listId.includes('Day');
           const alphabet = isRoute ? String.fromCharCode(65 + index) : null;
           const isExpanded = expandedItemId === item.id;
@@ -405,7 +411,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
             </div>
             
             {/* Travel time indicator between cards */}
-            {isRoute && routeLegs && routeLegs[index] && index < items.length - 1 && (
+            {isRoute && routeLegs && routeLegs[index] && index < safeItems.length - 1 && (
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
