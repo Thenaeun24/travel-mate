@@ -202,6 +202,10 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         animation={150}
         scroll={true}
         scrollSensitivity={50}
+        // 모바일 터치에서는 짧게 눌렀다 끌어야 드래그 시작(아니면 페이지 스크롤로 인식됨)
+        delay={150}
+        delayOnTouchOnly={true}
+        touchStartThreshold={5}
         ghostClass="sortable-ghost"
         filter="textarea, input, select"
         preventOnFilter={false}
