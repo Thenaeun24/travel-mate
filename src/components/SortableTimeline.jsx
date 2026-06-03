@@ -22,6 +22,30 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
   const [dayPickerPos, setDayPickerPos] = useState({ x: 0, y: 0 });
   const isMobile = useIsMobile();
 
+  // ── 중복/누락 id 자가 치유 ────────────────────────────────────────────────
+  // react-sortablejs와 React key는 항목마다 고유 id를 요구한다. id가 겹치면
+  // 두 카드가 한 덩어리처럼 묶여 순서가 안 바뀌거나 같은 내용으로 복제된다.
+  // 어떤 경로로 들어온 데이터든 렌더 직전에 보정하고 상위로 전파한다.
+  useEffect(() => {
+    const seen = new Set();
+    let changed = false;
+    const fixed = items.map((it) => {
+      if (it.id == null || it.id === '' || seen.has(it.id)) {
+        changed = true;
+        let nid;
+        do {
+          nid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        } while (seen.has(nid));
+        seen.add(nid);
+        return { ...it, id: nid };
+      }
+      seen.add(it.id);
+      return it;
+    });
+    if (changed) setItems(fixed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
   // ── Long press logic (mobile only) ────────────────────────────────────────
   const longPressTimer = useRef(null);
   const longPressTriggered = useRef(false);
