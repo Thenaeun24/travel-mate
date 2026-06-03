@@ -190,10 +190,12 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
         list={items}
         setList={(newList) => {
           // ReactSortable calls setList on mount and on every render.
-          // Only propagate if the list actually changed (different IDs or order).
-          const oldIds = items.map((i) => i.id).join(',');
-          const newIds = newList.map((i) => i.id).join(',');
-          if (oldIds !== newIds) {
+          // id 문자열 비교는 항목 id가 중복되면 순서 변경을 놓치므로,
+          // 객체 참조로 실제 순서/구성이 바뀌었을 때만 반영한다.
+          const changed =
+            newList.length !== items.length ||
+            newList.some((it, i) => it !== items[i]);
+          if (changed) {
             setItems(newList);
           }
         }}

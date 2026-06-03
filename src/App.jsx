@@ -31,18 +31,32 @@ const toArray = (val) => {
   return [];
 };
 
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
 const normalizeFolders = (data) => {
   const list = toArray(data);
+  // 데이터 전체에서 항목 id가 중복/누락되면 순서 변경(드래그)과 React 렌더링이
+  // 깨지므로, 처음 보는 id만 유지하고 중복/빈 id는 새 고유 id로 교정한다.
+  const seenIds = new Set();
+  const fixId = (item) => {
+    let id = item.id;
+    if (id == null || id === '' || seenIds.has(id)) {
+      do { id = genId(); } while (seenIds.has(id));
+      item = { ...item, id };
+    }
+    seenIds.add(id);
+    return item;
+  };
   return list
     .filter((f) => f && typeof f === 'object')
     .map((folder) => ({
       ...folder,
-      items: toArray(folder.items).filter((i) => i && typeof i === 'object'),
+      items: toArray(folder.items).filter((i) => i && typeof i === 'object').map(fixId),
       days: toArray(folder.days)
         .filter((d) => d && typeof d === 'object')
         .map((day) => ({
           ...day,
-          items: toArray(day.items).filter((i) => i && typeof i === 'object'),
+          items: toArray(day.items).filter((i) => i && typeof i === 'object').map(fixId),
         })),
       expenses: toArray(folder.expenses).filter((e) => e && typeof e === 'object'),
     }));
