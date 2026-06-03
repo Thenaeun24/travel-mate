@@ -59,6 +59,8 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
   const [storagePage, setStoragePage] = useState(0);
   const STORAGE_PAGE_SIZE = 5;
   const isMobile = useIsMobile();
+  const [optimizePreview, setOptimizePreview] = useState(null); // 미리보기 데이터
+  const [optimizing, setOptimizing] = useState(false);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const DEFAULT_FOLDER = {
@@ -240,6 +242,90 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
 
   const handleRouteCalculated = useCallback((legs) => setRouteLegs(legs), []);
 
+  // ── 동선 최적화: 미리보기 → 적용 ───────────────────────────────────────────
+  const sumLegs = (legs) =>
+    (legs || []).reduce(
+      (acc, l) => ({
+        dist: acc.dist + (l.distance?.value || 0),
+        dur: acc.dur + (l.duration?.value || 0),
+      }),
+      { dist: 0, dur: 0 }
+    );
+
+  const fmtDuration = (sec) => {
+    const m = Math.round(sec / 60);
+    if (m < 60) return `${m}분`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem ? `${h}시간 ${rem}분` : `${h}시간`;
+  };
+
+  const fmtDistance = (m) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
+
+  const handleOptimizeClick = () => {
+    const day = activeFolderDays[routedDayIndex];
+    const items = day?.items || [];
+    if (items.length - 2 < 2) {
+      alert('거쳐가는 장소가 2곳 이상일 때 동선을 최적화할 수 있어요.');
+      return;
+    }
+    if (!window.google?.maps) {
+      alert('지도를 먼저 불러온 뒤 다시 시도해주세요.');
+      return;
+    }
+    if (items.some((p) => p.lat == null || p.lng == null)) {
+      alert('위치 정보가 없는 장소가 있어 최적화할 수 없어요.');
+      return;
+    }
+
+    setOptimizing(true);
+    const svc = new window.google.maps.DirectionsService();
+    const origin = { lat: items[0].lat, lng: items[0].lng };
+    const destination = {
+      lat: items[items.length - 1].lat,
+      lng: items[items.length - 1].lng,
+    };
+    const waypoints = items.slice(1, -1).map((p) => ({
+      location: { lat: p.lat, lng: p.lng },
+      stopover: true,
+    }));
+
+    svc.route(
+      {
+        origin,
+        destination,
+        waypoints,
+        optimizeWaypoints: true,
+        travelMode: window.google.maps.TravelMode.WALKING,
+      },
+      (res, status) => {
+        setOptimizing(false);
+        if (status !== 'OK' || !res.routes?.[0]) {
+          alert('경로를 계산하지 못했어요. 잠시 후 다시 시도해주세요.');
+          return;
+        }
+        const order = res.routes[0].waypoint_order || [];
+        const wps = items.slice(1, -1);
+        const newOrder = [items[0], ...order.map((i) => wps[i]), items[items.length - 1]];
+        const isSame = newOrder.every((it, i) => it.id === items[i].id);
+
+        const opt = sumLegs(res.routes[0].legs);
+        // 현재 순서 총합: 지도에 그려진 현재 경로(routeLegs)가 항목 수와 맞으면 사용
+        const cur =
+          routeLegs.length === items.length - 1 ? sumLegs(routeLegs) : null;
+
+        setOptimizePreview({ dayId: day.id, newOrder, isSame, cur, opt });
+      }
+    );
+  };
+
+  const handleApplyOptimize = () => {
+    if (optimizePreview && !optimizePreview.isSame) {
+      handleDayItemsChange(optimizePreview.dayId, optimizePreview.newOrder);
+    }
+    setOptimizePreview(null);
+  };
+
   // Reset page when category changes
   const handleStorageCategoryChange = (cat) => {
     setStorageCategory(cat);
@@ -414,12 +500,21 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                     <h2 style={{ fontSize: '20px', margin: 0, color: 'var(--color-text)', fontWeight: '800' }}>
                       📍 {activeFolderDays[routedDayIndex].title}
                     </h2>
-                    <button
-                      onClick={() => handleDeleteDay(activeFolderDays[routedDayIndex].id)}
-                      style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid #ff4d4f', background: 'white', color: '#ff4d4f', cursor: 'pointer' }}
-                    >
-                      Day 삭제
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        onClick={handleOptimizeClick}
+                        disabled={optimizing}
+                        style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid var(--color-point)', background: 'var(--color-point)', color: 'white', cursor: optimizing ? 'wait' : 'pointer', fontWeight: 'bold', opacity: optimizing ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                      >
+                        {optimizing ? '계산 중…' : '🔀 동선 최적화'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteDay(activeFolderDays[routedDayIndex].id)}
+                        style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid #ff4d4f', background: 'white', color: '#ff4d4f', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Day 삭제
+                      </button>
+                    </div>
                   </div>
 
                   <div className="schedule-timeline-list" style={{ flex: 1, overflowY: 'auto' }}>
@@ -555,6 +650,94 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
           </div>
         </div>
       </div>
+
+      {/* 동선 최적화 미리보기 모달 */}
+      {optimizePreview && (
+        <div
+          onClick={() => setOptimizePreview(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9500,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: '18px', width: '100%', maxWidth: '380px',
+              maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 12px 48px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ padding: '18px 20px 12px' }}>
+              <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#333' }}>🔀 동선 최적화 미리보기</div>
+            </div>
+
+            {optimizePreview.isSame ? (
+              <div style={{ padding: '8px 20px 20px', color: '#555', fontSize: '14px', lineHeight: 1.6 }}>
+                이미 가장 효율적인 순서예요 👍<br />바꿀 필요가 없습니다.
+              </div>
+            ) : (
+              <>
+                {/* 비교 */}
+                <div style={{ padding: '4px 20px 12px', display: 'flex', gap: '10px' }}>
+                  {optimizePreview.cur && (
+                    <div style={{ flex: 1, background: '#f6f6f8', borderRadius: '12px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>현재 순서</div>
+                      <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#555' }}>🚶 {fmtDuration(optimizePreview.cur.dur)}</div>
+                      <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>{fmtDistance(optimizePreview.cur.dist)}</div>
+                    </div>
+                  )}
+                  <div style={{ flex: 1, background: '#f3effe', borderRadius: '12px', padding: '12px', textAlign: 'center', border: '1px solid var(--color-point)' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--color-point)', marginBottom: '4px', fontWeight: 'bold' }}>최적화 순서</div>
+                    <div style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--color-point)' }}>🚶 {fmtDuration(optimizePreview.opt.dur)}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-point)', marginTop: '2px' }}>{fmtDistance(optimizePreview.opt.dist)}</div>
+                  </div>
+                </div>
+
+                {/* 절감 안내 */}
+                {optimizePreview.cur && (optimizePreview.cur.dur - optimizePreview.opt.dur > 0 || optimizePreview.cur.dist - optimizePreview.opt.dist > 0) && (
+                  <div style={{ padding: '0 20px 10px', fontSize: '13px', color: '#1a9c4e', fontWeight: 'bold', textAlign: 'center' }}>
+                    약 {fmtDuration(Math.max(0, optimizePreview.cur.dur - optimizePreview.opt.dur))} · {fmtDistance(Math.max(0, optimizePreview.cur.dist - optimizePreview.opt.dist))} 단축돼요
+                  </div>
+                )}
+
+                {/* 바뀔 순서 */}
+                <div style={{ padding: '6px 20px', fontSize: '12px', color: '#999' }}>바뀔 순서</div>
+                <div style={{ overflowY: 'auto', padding: '0 20px', flex: 1 }}>
+                  {optimizePreview.newOrder.map((it, idx) => (
+                    <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: idx < optimizePreview.newOrder.length - 1 ? '1px solid #f2f2f2' : 'none' }}>
+                      <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#EA4335', color: 'white', fontSize: '11px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {String.fromCharCode(65 + idx)}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#333' }}>{it.name}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* 버튼 */}
+            <div style={{ display: 'flex', gap: '10px', padding: '14px 20px', borderTop: '1px solid #f0f0f0' }}>
+              <button
+                onClick={() => setOptimizePreview(null)}
+                style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#666', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                {optimizePreview.isSame ? '닫기' : '취소'}
+              </button>
+              {!optimizePreview.isSame && (
+                <button
+                  onClick={handleApplyOptimize}
+                  style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: 'var(--color-point)', color: 'white', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  이 순서로 적용
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
