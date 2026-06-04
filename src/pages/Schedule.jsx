@@ -220,34 +220,14 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
     );
   };
 
-  const handleRouteOptimized = useCallback((optimizedOrderIndices) => {
-    const currentDay = activeFolderDays[routedDayIndex];
-    const currentItems = currentDay?.items || [];
-    if (
-      currentDay &&
-      optimizedOrderIndices &&
-      optimizedOrderIndices.length === currentItems.length - 2
-    ) {
-      const start = currentItems[0];
-      const end = currentItems[currentItems.length - 1];
-      const waypoints = currentItems.slice(1, -1);
-      const newWaypoints = optimizedOrderIndices.map((i) => waypoints[i]);
-      const optimizedItems = [start, ...newWaypoints, end];
-      const isChanged = optimizedItems.some(
-        (item, i) => item.id !== currentItems[i].id
-      );
-      if (isChanged) handleDayItemsChange(currentDay.id, optimizedItems);
-    }
-  }, [activeFolderDays, routedDayIndex, handleDayItemsChange]);
-
   const handleRouteCalculated = useCallback((legs) => setRouteLegs(legs), []);
 
   // ── 동선 최적화: 미리보기 → 적용 ───────────────────────────────────────────
   const sumLegs = (legs) =>
     (legs || []).reduce(
       (acc, l) => ({
-        dist: acc.dist + (l.distance?.value || 0),
-        dur: acc.dur + (l.duration?.value || 0),
+        dist: acc.dist + (l?.distance?.value || 0),
+        dur: acc.dur + (l?.duration?.value || 0),
       }),
       { dist: 0, dur: 0 }
     );
@@ -459,7 +439,6 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
             <Map
               storageMarkers={storageAndOtherMarkers}
               routeMarkers={routeMarkers}
-              onRouteOptimized={handleRouteOptimized}
               onRouteCalculated={handleRouteCalculated}
               height="100%"
             />

@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 
-const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRouteCalculated, height }) => {
+const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height }) => {
   const mapRef = useRef(null);
   const [map, setMap] = useState(null);
   const directionsServiceRef = useRef(null);
-  const directionsRendererRef = useRef(null);
+  // 구간(leg)별로 교통수단이 다를 수 있어 구간마다 별도의 Renderer를 쓴다.
+  const segmentRenderersRef = useRef([]);
+  const routePointMarkersRef = useRef([]);
   const markersRef = useRef([]);
 
   useEffect(() => {
@@ -29,13 +31,8 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
           scrollwheel: true,
           gestureHandling: 'greedy',
         });
-        
+
         directionsServiceRef.current = new window.google.maps.DirectionsService();
-        directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-          map: mapInstance,
-          suppressMarkers: false, // let it draw markers for the route
-          preserveViewport: true, // Allow manual zoom freedom
-        });
 
         setMap(mapInstance);
       } catch (e) {
@@ -91,68 +88,124 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
 
   // Effect to handle routing
   useEffect(() => {
-    if (!map || !window.google || !directionsServiceRef.current || !directionsRendererRef.current) return;
+    if (!map || !window.google || !directionsServiceRef.current) return;
 
+    // 교통수단(transport)이 바뀌면 소요시간도 다시 계산해야 하므로 시그니처에 포함한다.
     const routeSignature = routeMarkers
-      .map(p => `${p.lat},${p.lng}`)
+      .map(p => `${p.lat},${p.lng},${p.transport || ''}`)
       .join('|');
     if (routeSignature === lastRouteSignatureRef.current) return;
     lastRouteSignatureRef.current = routeSignature;
 
-    if (routeMarkers.length >= 2) {
-      const origin = { lat: routeMarkers[0].lat, lng: routeMarkers[0].lng };
-      const destination = { lat: routeMarkers[routeMarkers.length - 1].lat, lng: routeMarkers[routeMarkers.length - 1].lng };
-      
-      const waypoints = routeMarkers.slice(1, -1).map(p => ({
-        location: { lat: p.lat, lng: p.lng },
-        stopover: true
-      }));
+    const clearRoute = () => {
+      segmentRenderersRef.current.forEach(r => r.setMap(null));
+      segmentRenderersRef.current = [];
+      routePointMarkersRef.current.forEach(m => m.setMap(null));
+      routePointMarkersRef.current = [];
+    };
 
-      directionsServiceRef.current.route({
-        origin,
-        destination,
-        waypoints,
-        // 사용자가 정한 일정 순서를 그대로 따른다. true로 두면 구글이 거리순으로
-        // 재정렬한 결과가 일정 순서를 덮어써, 수동으로 순서를 바꿀 수 없게 된다.
-        optimizeWaypoints: false,
-        travelMode: window.google.maps.TravelMode.WALKING // or DRIVING
-      }, (response, status) => {
-        if (status === 'OK') {
-          directionsRendererRef.current.setDirections(response);
-          
-          // Fit bounds ONLY when marker count changes or it's the first time
-          if (routeMarkers.length !== lastMarkerCountRef.current) {
-             const bounds = new window.google.maps.LatLngBounds();
-             routeMarkers.forEach(p => bounds.extend({ lat: p.lat, lng: p.lng }));
-             map.fitBounds(bounds);
-             lastMarkerCountRef.current = routeMarkers.length;
-          }
+    // 일정에서 고른 이동수단 → Google Directions 옵션 매핑
+    const travelOptionsFor = (transport) => {
+      const g = window.google.maps;
+      switch (transport) {
+        case '버스':
+          return { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.BUS] } };
+        case '지하철':
+          return { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.SUBWAY] } };
+        case '택시':
+          return { travelMode: g.TravelMode.DRIVING };
+        case '도보':
+        default:
+          return { travelMode: g.TravelMode.WALKING };
+      }
+    };
 
-          if (onRouteOptimized && response.routes[0].waypoint_order && response.routes[0].waypoint_order.length > 0) {
-             onRouteOptimized(response.routes[0].waypoint_order);
-          }
-          if (onRouteCalculated && response.routes[0].legs) {
-             onRouteCalculated(response.routes[0].legs);
-          }
-        } else {
-          console.error("Directions request failed due to " + status);
-          directionsRendererRef.current.setDirections({ routes: [] });
-          
-          const bounds = new window.google.maps.LatLngBounds();
-          routeMarkers.forEach(place => {
-            if (place.lat && place.lng) {
-              bounds.extend({ lat: place.lat, lng: place.lng });
-            }
-          });
-          if (routeMarkers.length !== lastMarkerCountRef.current) {
-            map.fitBounds(bounds);
-            lastMarkerCountRef.current = routeMarkers.length;
+    // 한 구간을 해당 이동수단으로 계산한다. 대중교통/운전이 실패하면(데이터 없음 등)
+    // 도보로 폴백해 최소한 시간이 비지 않도록 한다.
+    const routeSegment = (from, to, transport) => new Promise((resolve) => {
+      const g = window.google.maps;
+      if (from?.lat == null || from?.lng == null || to?.lat == null || to?.lng == null) {
+        resolve({ response: null, leg: null });
+        return;
+      }
+      const origin = { lat: from.lat, lng: from.lng };
+      const destination = { lat: to.lat, lng: to.lng };
+      const opts = travelOptionsFor(transport);
+
+      directionsServiceRef.current.route(
+        { origin, destination, ...opts },
+        (response, status) => {
+          if (status === 'OK' && response.routes?.[0]) {
+            resolve({ response, leg: response.routes[0].legs[0] });
+          } else if (opts.travelMode !== g.TravelMode.WALKING) {
+            directionsServiceRef.current.route(
+              { origin, destination, travelMode: g.TravelMode.WALKING },
+              (res2, st2) => {
+                if (st2 === 'OK' && res2.routes?.[0]) {
+                  resolve({ response: res2, leg: res2.routes[0].legs[0] });
+                } else {
+                  resolve({ response: null, leg: null });
+                }
+              }
+            );
+          } else {
+            resolve({ response: null, leg: null });
           }
         }
-      });
+      );
+    });
+
+    if (routeMarkers.length >= 2) {
+      const pairs = [];
+      for (let i = 0; i < routeMarkers.length - 1; i++) {
+        // 구간의 이동수단은 출발 지점(앞 카드)에서 고른 값을 따른다.
+        pairs.push([routeMarkers[i], routeMarkers[i + 1], routeMarkers[i].transport]);
+      }
+
+      Promise.all(pairs.map(([from, to, transport]) => routeSegment(from, to, transport)))
+        .then((results) => {
+          clearRoute();
+
+          // 구간별 경로를 각각 그린다 (마커는 아래에서 직접 번호로 표시).
+          results.forEach(({ response }) => {
+            if (!response) return;
+            const renderer = new window.google.maps.DirectionsRenderer({
+              map,
+              suppressMarkers: true,
+              preserveViewport: true,
+            });
+            renderer.setDirections(response);
+            segmentRenderersRef.current.push(renderer);
+          });
+
+          // 방문 순서 번호 마커
+          routeMarkers.forEach((p, idx) => {
+            if (p.lat == null || p.lng == null) return;
+            const marker = new window.google.maps.Marker({
+              position: { lat: p.lat, lng: p.lng },
+              map,
+              label: { text: String(idx + 1), color: '#fff', fontSize: '12px', fontWeight: 'bold' },
+              title: p.name,
+            });
+            routePointMarkersRef.current.push(marker);
+          });
+
+          // 타임라인에 구간 순서대로 leg 전달 (실패한 구간은 null)
+          if (onRouteCalculated) onRouteCalculated(results.map(r => r.leg));
+
+          // Fit bounds ONLY when marker count changes or it's the first time
+          if (routeMarkers.length !== lastMarkerCountRef.current) {
+            const bounds = new window.google.maps.LatLngBounds();
+            routeMarkers.forEach(p => {
+              if (p.lat != null && p.lng != null) bounds.extend({ lat: p.lat, lng: p.lng });
+            });
+            if (!bounds.isEmpty()) map.fitBounds(bounds);
+            lastMarkerCountRef.current = routeMarkers.length;
+          }
+        });
     } else {
-      directionsRendererRef.current.setDirections({ routes: [] });
-      
+      clearRoute();
+
       if (routeMarkers.length === 1 && storageMarkers.length === 0 && lastMarkerCountRef.current !== 1) {
         map.setCenter({ lat: routeMarkers[0].lat, lng: routeMarkers[0].lng });
         map.setZoom(15);
@@ -161,7 +214,7 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteOptimized, onRoute
         lastMarkerCountRef.current = 0;
       }
     }
-  }, [map, routeMarkers, storageMarkers.length, onRouteOptimized]);
+  }, [map, routeMarkers, storageMarkers.length, onRouteCalculated]);
 
   return (
     <div style={{ width: '100%', height: height || '35vh', backgroundColor: '#e0e0e0', position: 'relative', overflow: 'hidden' }}>
