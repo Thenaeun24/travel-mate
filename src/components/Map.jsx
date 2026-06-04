@@ -140,19 +140,56 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
       }
     };
 
-    // 대중교통 실데이터가 없을 때 이동거리 기반으로 소요시간을 추정한다.
+    // ── 표시용 포맷터 ─────────────────────────────────────────────────────────
+    const fmtDur = (sec) => {
+      const m = Math.max(1, Math.round(sec / 60));
+      if (m < 60) return `${m}분`;
+      const h = Math.floor(m / 60);
+      const r = m % 60;
+      return r ? `${h}시간 ${r}분` : `${h}시간`;
+    };
+    const fmtDist = (m) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
+
+    // 대중교통 실데이터가 없을 때 이동거리 기반으로 소요시간(초)을 추정한다.
     const TRANSIT_SPEED_MPS = { '버스': 5.0, '지하철': 9.0 };   // ~18km/h, ~32km/h
     const TRANSIT_OVERHEAD_SEC = { '버스': 300, '지하철': 360 }; // 대기·환승·접근 시간
-    const toEstimatedLeg = (baseLeg, transport) => {
-      const meters = baseLeg?.distance?.value || 0;
+    const estimatedSeconds = (meters, transport) => {
       const speed = TRANSIT_SPEED_MPS[transport] || 5.0;
-      const sec = Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
-      const min = Math.max(1, Math.round(sec / 60));
-      return { ...baseLeg, duration: { text: `약 ${min}분`, value: min * 60 } };
+      return Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
     };
 
+    // 경로 요청이 모두 실패할 때 쓰는 직선거리(미터)
+    const haversineMeters = (a, b) => {
+      const R = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+      return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+    };
+    // 직선거리 추정에 쓰는 대략 속도(m/s)
+    const STRAIGHT_SPEED_MPS = { '도보': 1.3, '버스': 5.0, '지하철': 9.0, '택시': 8.0 };
+
+    // 모든 leg의 표시 텍스트를 한국어 "시간/분", "m/km"으로 통일한다.
+    // 추정값(estimated)에는 소요시간 앞에 '약'을 붙인다.
+    const normalizeLeg = (leg, estimated) => ({
+      ...leg,
+      distance: {
+        value: leg.distance?.value || 0,
+        text: fmtDist(leg.distance?.value || 0),
+      },
+      duration: {
+        value: leg.duration?.value || 0,
+        text: (estimated ? '약 ' : '') + fmtDur(leg.duration?.value || 0),
+      },
+    });
+
     // 한 구간을 해당 이동수단으로 계산한다. 후보를 우선순위대로 시도하며,
-    // 결과가 없으면 다음 후보로 폴백한다. 동일 구간은 캐시를 재사용한다.
+    // 결과가 없으면 다음 후보로 폴백한다. 모든 경로가 실패해도 직선거리 기반
+    // 추정치를 반환해 "시간이 아예 안 뜨는" 경우가 없도록 한다.
+    // 동일 구간은 캐시를 재사용한다.
     const routeSegment = (from, to, transport) => new Promise((resolve) => {
       if (from?.lat == null || from?.lng == null || to?.lat == null || to?.lng == null) {
         resolve({ response: null, leg: null });
@@ -169,10 +206,24 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
       const destination = { lat: to.lat, lng: to.lng };
       const chain = requestChainFor(transport);
 
+      // 경로 API가 전부 실패할 때: 직선거리 기반 추정 (항상 무언가는 보여준다).
+      // 실제 경로가 나중에 잡힐 여지를 위해 캐시에는 저장하지 않는다.
+      const straightLineFallback = () => {
+        const meters = haversineMeters(origin, destination);
+        const speed = STRAIGHT_SPEED_MPS[transport] || 1.3;
+        const sec = Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
+        resolve({
+          response: null,
+          leg: {
+            distance: { value: meters, text: fmtDist(meters) },
+            duration: { value: sec, text: `약 ${fmtDur(sec)}` },
+          },
+        });
+      };
+
       const tryAt = (idx) => {
         if (idx >= chain.length) {
-          // 모든 후보 실패: 캐시하지 않아 이후 재시도가 가능하다.
-          resolve({ response: null, leg: null });
+          straightLineFallback();
           return;
         }
         const attempt = chain[idx];
@@ -181,7 +232,17 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
           (response, status) => {
             if (status === 'OK' && response.routes?.[0]) {
               const rawLeg = response.routes[0].legs[0];
-              const leg = attempt.estimateAs ? toEstimatedLeg(rawLeg, attempt.estimateAs) : rawLeg;
+              let leg;
+              if (attempt.estimateAs) {
+                // 실제 경로(거리)만 쓰고 소요시간은 수단별 속도로 추정
+                const meters = rawLeg.distance?.value || 0;
+                leg = normalizeLeg(
+                  { ...rawLeg, duration: { value: estimatedSeconds(meters, attempt.estimateAs) } },
+                  true
+                );
+              } else {
+                leg = normalizeLeg(rawLeg, false);
+              }
               const result = { response, leg };
               legCacheRef.current.set(cacheKey, result);
               resolve(result);
