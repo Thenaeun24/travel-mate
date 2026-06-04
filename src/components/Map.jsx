@@ -107,27 +107,39 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
       routePointMarkersRef.current = [];
     };
 
-    // 일정에서 고른 이동수단 → Google Directions 옵션 매핑
-    const travelOptionsFor = (transport) => {
+    // 일정에서 고른 이동수단 → Google Directions 요청 후보들(우선순위 순).
+    // 앞 후보가 결과가 없으면(ZERO_RESULTS 등) 다음 후보로 폴백한다.
+    // 대중교통(TRANSIT)의 leg.duration은 구글맵처럼 "정류장까지 도보 + 대중교통"을
+    // 모두 합친 문 앞~문 앞 총 소요시간이다.
+    const requestChainFor = (transport) => {
       const g = window.google.maps;
       switch (transport) {
         case '버스':
-          return { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.BUS] } };
+          return [
+            { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.BUS] } },
+            { travelMode: g.TravelMode.TRANSIT }, // 버스 노선이 없으면 도보+대중교통 종합 경로
+            { travelMode: g.TravelMode.WALKING },
+          ];
         case '지하철':
-          return { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.SUBWAY] } };
+          return [
+            { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.SUBWAY] } },
+            { travelMode: g.TravelMode.TRANSIT }, // 지하철이 없으면 도보+대중교통 종합 경로
+            { travelMode: g.TravelMode.WALKING },
+          ];
         case '택시':
-          return { travelMode: g.TravelMode.DRIVING };
+          return [
+            { travelMode: g.TravelMode.DRIVING },
+            { travelMode: g.TravelMode.WALKING },
+          ];
         case '도보':
         default:
-          return { travelMode: g.TravelMode.WALKING };
+          return [{ travelMode: g.TravelMode.WALKING }];
       }
     };
 
-    // 한 구간을 해당 이동수단으로 계산한다. 대중교통/운전이 실패하면(데이터 없음 등)
-    // 도보로 폴백해 최소한 시간이 비지 않도록 한다.
-    // 동일 구간은 캐시를 재사용해 API 재호출을 피한다.
+    // 한 구간을 해당 이동수단으로 계산한다. 후보를 우선순위대로 시도하며,
+    // 결과가 없으면 다음 후보로 폴백한다. 동일 구간은 캐시를 재사용한다.
     const routeSegment = (from, to, transport) => new Promise((resolve) => {
-      const g = window.google.maps;
       if (from?.lat == null || from?.lng == null || to?.lat == null || to?.lng == null) {
         resolve({ response: null, leg: null });
         return;
@@ -141,34 +153,28 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
 
       const origin = { lat: from.lat, lng: from.lng };
       const destination = { lat: to.lat, lng: to.lng };
-      const opts = travelOptionsFor(transport);
+      const chain = requestChainFor(transport);
 
-      directionsServiceRef.current.route(
-        { origin, destination, ...opts },
-        (response, status) => {
-          if (status === 'OK' && response.routes?.[0]) {
-            const result = { response, leg: response.routes[0].legs[0] };
-            legCacheRef.current.set(cacheKey, result);
-            resolve(result);
-          } else if (opts.travelMode !== g.TravelMode.WALKING) {
-            directionsServiceRef.current.route(
-              { origin, destination, travelMode: g.TravelMode.WALKING },
-              (res2, st2) => {
-                if (st2 === 'OK' && res2.routes?.[0]) {
-                  const result = { response: res2, leg: res2.routes[0].legs[0] };
-                  legCacheRef.current.set(cacheKey, result);
-                  resolve(result);
-                } else {
-                  // 실패는 캐시하지 않는다 (일시적 오류/한도 초과 시 이후 재시도 가능).
-                  resolve({ response: null, leg: null });
-                }
-              }
-            );
-          } else {
-            resolve({ response: null, leg: null });
-          }
+      const tryAt = (idx) => {
+        if (idx >= chain.length) {
+          // 모든 후보 실패: 캐시하지 않아 이후 재시도가 가능하다.
+          resolve({ response: null, leg: null });
+          return;
         }
-      );
+        directionsServiceRef.current.route(
+          { origin, destination, ...chain[idx] },
+          (response, status) => {
+            if (status === 'OK' && response.routes?.[0]) {
+              const result = { response, leg: response.routes[0].legs[0] };
+              legCacheRef.current.set(cacheKey, result);
+              resolve(result);
+            } else {
+              tryAt(idx + 1);
+            }
+          }
+        );
+      };
+      tryAt(0);
     });
 
     if (routeMarkers.length >= 2) {
