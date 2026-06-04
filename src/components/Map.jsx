@@ -190,19 +190,22 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
     // 백오프 후 재시도한다. 여러 구간을 한꺼번에 병렬로 쏘면 구글이 OVER_QUERY_LIMIT로
     // 거의 다 막아버려, 짧은 도보 구간까지 전부 실패→추정(약)으로 떨어진다.
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // 순차 호출이라 순간 과부하는 드물다. 일시적 OVER_QUERY_LIMIT만 짧게 한 번
+    // 재시도하고, 그래도 막히면(주로 일일 한도 소진) 바로 다음 후보/추정으로 넘어가
+    // 앱이 멈칫하지 않게 한다.
     const directionsRoute = async (request) => {
-      for (let attempt = 0; attempt <= 4; attempt++) {
+      for (let attempt = 0; attempt <= 1; attempt++) {
         const { response, status } = await new Promise((resolve) => {
           directionsServiceRef.current.route(request, (resp, stat) =>
             resolve({ response: resp, status: stat })
           );
         });
         if (status === 'OK' && response?.routes?.[0]) return response;
-        if (status === 'OVER_QUERY_LIMIT') {
-          await sleep(400 * 2 ** attempt); // 0.4s → 0.8s → 1.6s → 3.2s → 6.4s
+        if (status === 'OVER_QUERY_LIMIT' && attempt === 0) {
+          await sleep(500);
           continue;
         }
-        return null; // ZERO_RESULTS, NOT_FOUND 등은 즉시 다음 후보로
+        return null; // 한도 소진/ZERO_RESULTS 등은 즉시 다음 후보로
       }
       return null;
     };
