@@ -9,6 +9,9 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
   const segmentRenderersRef = useRef([]);
   const routePointMarkersRef = useRef([]);
   const markersRef = useRef([]);
+  // 같은 (출발·도착·이동수단) 구간은 결과를 캐싱해 불필요한 Directions API 호출을 막는다.
+  // 이동수단을 바꿔도 실제로 바뀐 구간만 새로 호출된다.
+  const legCacheRef = useRef(new window.Map());
 
   useEffect(() => {
     const initMap = async () => {
@@ -122,12 +125,20 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
 
     // 한 구간을 해당 이동수단으로 계산한다. 대중교통/운전이 실패하면(데이터 없음 등)
     // 도보로 폴백해 최소한 시간이 비지 않도록 한다.
+    // 동일 구간은 캐시를 재사용해 API 재호출을 피한다.
     const routeSegment = (from, to, transport) => new Promise((resolve) => {
       const g = window.google.maps;
       if (from?.lat == null || from?.lng == null || to?.lat == null || to?.lng == null) {
         resolve({ response: null, leg: null });
         return;
       }
+      const cacheKey = `${from.lat},${from.lng}|${to.lat},${to.lng}|${transport || ''}`;
+      const cached = legCacheRef.current.get(cacheKey);
+      if (cached) {
+        resolve(cached);
+        return;
+      }
+
       const origin = { lat: from.lat, lng: from.lng };
       const destination = { lat: to.lat, lng: to.lng };
       const opts = travelOptionsFor(transport);
@@ -136,14 +147,19 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
         { origin, destination, ...opts },
         (response, status) => {
           if (status === 'OK' && response.routes?.[0]) {
-            resolve({ response, leg: response.routes[0].legs[0] });
+            const result = { response, leg: response.routes[0].legs[0] };
+            legCacheRef.current.set(cacheKey, result);
+            resolve(result);
           } else if (opts.travelMode !== g.TravelMode.WALKING) {
             directionsServiceRef.current.route(
               { origin, destination, travelMode: g.TravelMode.WALKING },
               (res2, st2) => {
                 if (st2 === 'OK' && res2.routes?.[0]) {
-                  resolve({ response: res2, leg: res2.routes[0].legs[0] });
+                  const result = { response: res2, leg: res2.routes[0].legs[0] };
+                  legCacheRef.current.set(cacheKey, result);
+                  resolve(result);
                 } else {
+                  // 실패는 캐시하지 않는다 (일시적 오류/한도 초과 시 이후 재시도 가능).
                   resolve({ response: null, leg: null });
                 }
               }
