@@ -110,31 +110,45 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
     // 일정에서 고른 이동수단 → Google Directions 요청 후보들(우선순위 순).
     // 앞 후보가 결과가 없으면(ZERO_RESULTS 등) 다음 후보로 폴백한다.
     // 대중교통(TRANSIT)의 leg.duration은 구글맵처럼 "정류장까지 도보 + 대중교통"을
-    // 모두 합친 문 앞~문 앞 총 소요시간이다.
+    // 모두 합친 문 앞~문 앞 총 소요시간이다. 대중교통 데이터가 아예 없는 지역에서는
+    // 마지막에 거리 기반 추정치(estimateAs)로 도보와 다른 시간을 보여준다.
     const requestChainFor = (transport) => {
       const g = window.google.maps;
       switch (transport) {
         case '버스':
           return [
-            { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.BUS] } },
-            { travelMode: g.TravelMode.TRANSIT }, // 버스 노선이 없으면 도보+대중교통 종합 경로
-            { travelMode: g.TravelMode.WALKING },
+            { request: { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.BUS] } } },
+            { request: { travelMode: g.TravelMode.TRANSIT } }, // 도보+대중교통 종합 경로
+            { request: { travelMode: g.TravelMode.DRIVING }, estimateAs: '버스' }, // 데이터 없으면 거리 기반 추정
+            { request: { travelMode: g.TravelMode.WALKING }, estimateAs: '버스' },
           ];
         case '지하철':
           return [
-            { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.SUBWAY] } },
-            { travelMode: g.TravelMode.TRANSIT }, // 지하철이 없으면 도보+대중교통 종합 경로
-            { travelMode: g.TravelMode.WALKING },
+            { request: { travelMode: g.TravelMode.TRANSIT, transitOptions: { modes: [g.TransitMode.SUBWAY] } } },
+            { request: { travelMode: g.TravelMode.TRANSIT } },
+            { request: { travelMode: g.TravelMode.DRIVING }, estimateAs: '지하철' },
+            { request: { travelMode: g.TravelMode.WALKING }, estimateAs: '지하철' },
           ];
         case '택시':
           return [
-            { travelMode: g.TravelMode.DRIVING },
-            { travelMode: g.TravelMode.WALKING },
+            { request: { travelMode: g.TravelMode.DRIVING } },
+            { request: { travelMode: g.TravelMode.WALKING } },
           ];
         case '도보':
         default:
-          return [{ travelMode: g.TravelMode.WALKING }];
+          return [{ request: { travelMode: g.TravelMode.WALKING } }];
       }
+    };
+
+    // 대중교통 실데이터가 없을 때 이동거리 기반으로 소요시간을 추정한다.
+    const TRANSIT_SPEED_MPS = { '버스': 5.0, '지하철': 9.0 };   // ~18km/h, ~32km/h
+    const TRANSIT_OVERHEAD_SEC = { '버스': 300, '지하철': 360 }; // 대기·환승·접근 시간
+    const toEstimatedLeg = (baseLeg, transport) => {
+      const meters = baseLeg?.distance?.value || 0;
+      const speed = TRANSIT_SPEED_MPS[transport] || 5.0;
+      const sec = Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
+      const min = Math.max(1, Math.round(sec / 60));
+      return { ...baseLeg, duration: { text: `약 ${min}분`, value: min * 60 } };
     };
 
     // 한 구간을 해당 이동수단으로 계산한다. 후보를 우선순위대로 시도하며,
@@ -161,11 +175,14 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
           resolve({ response: null, leg: null });
           return;
         }
+        const attempt = chain[idx];
         directionsServiceRef.current.route(
-          { origin, destination, ...chain[idx] },
+          { origin, destination, ...attempt.request },
           (response, status) => {
             if (status === 'OK' && response.routes?.[0]) {
-              const result = { response, leg: response.routes[0].legs[0] };
+              const rawLeg = response.routes[0].legs[0];
+              const leg = attempt.estimateAs ? toEstimatedLeg(rawLeg, attempt.estimateAs) : rawLeg;
+              const result = { response, leg };
               legCacheRef.current.set(cacheKey, result);
               resolve(result);
             } else {
