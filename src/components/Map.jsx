@@ -186,74 +186,77 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
       },
     });
 
+    // Directions 단일 호출을 Promise로 감싸고, 요청 과다(OVER_QUERY_LIMIT)는
+    // 백오프 후 재시도한다. 여러 구간을 한꺼번에 병렬로 쏘면 구글이 OVER_QUERY_LIMIT로
+    // 거의 다 막아버려, 짧은 도보 구간까지 전부 실패→추정(약)으로 떨어진다.
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const directionsRoute = async (request) => {
+      for (let attempt = 0; attempt <= 4; attempt++) {
+        const { response, status } = await new Promise((resolve) => {
+          directionsServiceRef.current.route(request, (resp, stat) =>
+            resolve({ response: resp, status: stat })
+          );
+        });
+        if (status === 'OK' && response?.routes?.[0]) return response;
+        if (status === 'OVER_QUERY_LIMIT') {
+          await sleep(400 * 2 ** attempt); // 0.4s → 0.8s → 1.6s → 3.2s → 6.4s
+          continue;
+        }
+        return null; // ZERO_RESULTS, NOT_FOUND 등은 즉시 다음 후보로
+      }
+      return null;
+    };
+
     // 한 구간을 해당 이동수단으로 계산한다. 후보를 우선순위대로 시도하며,
     // 결과가 없으면 다음 후보로 폴백한다. 모든 경로가 실패해도 직선거리 기반
     // 추정치를 반환해 "시간이 아예 안 뜨는" 경우가 없도록 한다.
     // 동일 구간은 캐시를 재사용한다.
-    const routeSegment = (from, to, transport) => new Promise((resolve) => {
+    const routeSegment = async (from, to, transport) => {
       if (from?.lat == null || from?.lng == null || to?.lat == null || to?.lng == null) {
-        resolve({ response: null, leg: null });
-        return;
+        return { response: null, leg: null };
       }
       const cacheKey = `${from.lat},${from.lng}|${to.lat},${to.lng}|${transport || ''}`;
       const cached = legCacheRef.current.get(cacheKey);
-      if (cached) {
-        resolve(cached);
-        return;
-      }
+      if (cached) return cached;
 
       const origin = { lat: from.lat, lng: from.lng };
       const destination = { lat: to.lat, lng: to.lng };
       const chain = requestChainFor(transport);
 
-      // 경로 API가 전부 실패할 때: 직선거리 기반 추정 (항상 무언가는 보여준다).
-      // 실제 경로가 나중에 잡힐 여지를 위해 캐시에는 저장하지 않는다.
-      const straightLineFallback = () => {
-        const meters = haversineMeters(origin, destination);
-        const speed = STRAIGHT_SPEED_MPS[transport] || 1.3;
-        const sec = Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
-        resolve({
-          response: null,
-          leg: {
-            distance: { value: meters, text: fmtDist(meters) },
-            duration: { value: sec, text: `약 ${fmtDur(sec)}` },
-          },
-        });
-      };
-
-      const tryAt = (idx) => {
-        if (idx >= chain.length) {
-          straightLineFallback();
-          return;
-        }
-        const attempt = chain[idx];
-        directionsServiceRef.current.route(
-          { origin, destination, ...attempt.request },
-          (response, status) => {
-            if (status === 'OK' && response.routes?.[0]) {
-              const rawLeg = response.routes[0].legs[0];
-              let leg;
-              if (attempt.estimateAs) {
-                // 실제 경로(거리)만 쓰고 소요시간은 수단별 속도로 추정
-                const meters = rawLeg.distance?.value || 0;
-                leg = normalizeLeg(
-                  { ...rawLeg, duration: { value: estimatedSeconds(meters, attempt.estimateAs) } },
-                  true
-                );
-              } else {
-                leg = normalizeLeg(rawLeg, false);
-              }
-              const result = { response, leg };
-              legCacheRef.current.set(cacheKey, result);
-              resolve(result);
-            } else {
-              tryAt(idx + 1);
-            }
+      for (const attempt of chain) {
+        const response = await directionsRoute({ origin, destination, ...attempt.request });
+        if (response) {
+          const rawLeg = response.routes[0].legs[0];
+          let leg;
+          if (attempt.estimateAs) {
+            // 실제 경로(거리)만 쓰고 소요시간은 수단별 속도로 추정
+            const meters = rawLeg.distance?.value || 0;
+            leg = normalizeLeg(
+              { ...rawLeg, duration: { value: estimatedSeconds(meters, attempt.estimateAs) } },
+              true
+            );
+          } else {
+            leg = normalizeLeg(rawLeg, false);
           }
-        );
+          const result = { response, leg };
+          legCacheRef.current.set(cacheKey, result);
+          return result;
+        }
+      }
+
+      // 모든 경로 실패 시: 직선거리 기반 추정 (항상 무언가는 보여준다).
+      // 실제 경로가 나중에 잡힐 여지를 위해 캐시에는 저장하지 않는다.
+      const meters = haversineMeters(origin, destination);
+      const speed = STRAIGHT_SPEED_MPS[transport] || 1.3;
+      const sec = Math.round(meters / speed) + (TRANSIT_OVERHEAD_SEC[transport] || 0);
+      return {
+        response: null,
+        leg: {
+          distance: { value: meters, text: fmtDist(meters) },
+          duration: { value: sec, text: `약 ${fmtDur(sec)}` },
+        },
       };
-      tryAt(0);
-    });
+    };
 
     if (routeMarkers.length >= 2) {
       const pairs = [];
@@ -262,47 +265,55 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
         pairs.push([routeMarkers[i], routeMarkers[i + 1], routeMarkers[i].transport]);
       }
 
-      Promise.all(pairs.map(([from, to, transport]) => routeSegment(from, to, transport)))
-        .then((results) => {
-          clearRoute();
+      (async () => {
+        // 순차 호출로 요청 과다(OVER_QUERY_LIMIT)를 피한다.
+        const results = [];
+        for (const [from, to, transport] of pairs) {
+          results.push(await routeSegment(from, to, transport));
+        }
 
-          // 구간별 경로를 각각 그린다 (마커는 아래에서 직접 번호로 표시).
-          results.forEach(({ response }) => {
-            if (!response) return;
-            const renderer = new window.google.maps.DirectionsRenderer({
-              map,
-              suppressMarkers: true,
-              preserveViewport: true,
-            });
-            renderer.setDirections(response);
-            segmentRenderersRef.current.push(renderer);
+        // 계산 중 경로가 또 바뀌었다면(최신 시그니처와 다르면) 낡은 결과는 버린다.
+        if (lastRouteSignatureRef.current !== routeSignature) return;
+
+        clearRoute();
+
+        // 구간별 경로를 각각 그린다 (마커는 아래에서 직접 번호로 표시).
+        results.forEach(({ response }) => {
+          if (!response) return;
+          const renderer = new window.google.maps.DirectionsRenderer({
+            map,
+            suppressMarkers: true,
+            preserveViewport: true,
           });
-
-          // 방문 순서 번호 마커
-          routeMarkers.forEach((p, idx) => {
-            if (p.lat == null || p.lng == null) return;
-            const marker = new window.google.maps.Marker({
-              position: { lat: p.lat, lng: p.lng },
-              map,
-              label: { text: String(idx + 1), color: '#fff', fontSize: '12px', fontWeight: 'bold' },
-              title: p.name,
-            });
-            routePointMarkersRef.current.push(marker);
-          });
-
-          // 타임라인에 구간 순서대로 leg 전달 (실패한 구간은 null)
-          if (onRouteCalculated) onRouteCalculated(results.map(r => r.leg));
-
-          // Fit bounds ONLY when marker count changes or it's the first time
-          if (routeMarkers.length !== lastMarkerCountRef.current) {
-            const bounds = new window.google.maps.LatLngBounds();
-            routeMarkers.forEach(p => {
-              if (p.lat != null && p.lng != null) bounds.extend({ lat: p.lat, lng: p.lng });
-            });
-            if (!bounds.isEmpty()) map.fitBounds(bounds);
-            lastMarkerCountRef.current = routeMarkers.length;
-          }
+          renderer.setDirections(response);
+          segmentRenderersRef.current.push(renderer);
         });
+
+        // 방문 순서 번호 마커
+        routeMarkers.forEach((p, idx) => {
+          if (p.lat == null || p.lng == null) return;
+          const marker = new window.google.maps.Marker({
+            position: { lat: p.lat, lng: p.lng },
+            map,
+            label: { text: String(idx + 1), color: '#fff', fontSize: '12px', fontWeight: 'bold' },
+            title: p.name,
+          });
+          routePointMarkersRef.current.push(marker);
+        });
+
+        // 타임라인에 구간 순서대로 leg 전달 (실패한 구간은 null)
+        if (onRouteCalculated) onRouteCalculated(results.map(r => r.leg));
+
+        // Fit bounds ONLY when marker count changes or it's the first time
+        if (routeMarkers.length !== lastMarkerCountRef.current) {
+          const bounds = new window.google.maps.LatLngBounds();
+          routeMarkers.forEach(p => {
+            if (p.lat != null && p.lng != null) bounds.extend({ lat: p.lat, lng: p.lng });
+          });
+          if (!bounds.isEmpty()) map.fitBounds(bounds);
+          lastMarkerCountRef.current = routeMarkers.length;
+        }
+      })();
     } else {
       clearRoute();
 
