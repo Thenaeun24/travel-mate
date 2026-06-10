@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 
+// 장소 이름이 그대로 HTML로 들어가지 않도록 이스케이프한다.
+const escapeHtml = (str) =>
+  String(str || '').replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+
 // 카테고리별 마커 색상 + 이모지. 보관함/다른 날 장소를 지도에서 한눈에 구분하기 위함.
 const categoryPin = (category) => {
   const c = category || '';
@@ -30,6 +36,8 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
   const segmentRenderersRef = useRef([]);
   const routePointMarkersRef = useRef([]);
   const markersRef = useRef([]);
+  // 마커를 누르면 이름을 띄우는 공용 InfoWindow.
+  const infoWindowRef = useRef(null);
   // 같은 (출발·도착·이동수단) 구간은 결과를 캐싱해 불필요한 Directions API 호출을 막는다.
   // 이동수단을 바꿔도 실제로 바뀐 구간만 새로 호출된다.
   const legCacheRef = useRef(new window.Map());
@@ -57,6 +65,7 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
         });
 
         directionsServiceRef.current = new window.google.maps.DirectionsService();
+        infoWindowRef.current = new window.google.maps.InfoWindow();
 
         setMap(mapInstance);
       } catch (e) {
@@ -103,6 +112,12 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
             scaledSize: new window.google.maps.Size(34, 41),
             anchor: new window.google.maps.Point(17, 41),
           },
+        });
+        marker.addListener('click', () => {
+          infoWindowRef.current.setContent(
+            `<div style="font-size:13px;font-weight:600;color:#333;padding:2px 4px;">${emoji} ${escapeHtml(place.name)}</div>`
+          );
+          infoWindowRef.current.open({ map, anchor: marker });
         });
         markersRef.current.push(marker);
         bounds.extend(position);
@@ -327,6 +342,12 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
             map,
             label: { text: String(idx + 1), color: '#fff', fontSize: '12px', fontWeight: 'bold' },
             title: p.name,
+          });
+          marker.addListener('click', () => {
+            infoWindowRef.current.setContent(
+              `<div style="font-size:13px;font-weight:600;color:#333;padding:2px 4px;">${idx + 1}. ${escapeHtml(p.name)}</div>`
+            );
+            infoWindowRef.current.open({ map, anchor: marker });
           });
           routePointMarkersRef.current.push(marker);
         });
