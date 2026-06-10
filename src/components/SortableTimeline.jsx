@@ -245,7 +245,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
       >
         {safeItems.map((item, index) => {
           const isRoute = listId.includes('Day');
-          const alphabet = isRoute ? String.fromCharCode(65 + index) : null;
+          const orderLabel = isRoute ? String(index + 1) : null;
           const isExpanded = expandedItemId === item.id;
           const isScheduled = isCloneable && scheduledPlaceIds.includes(item.googlePlaceId || item.name);
           
@@ -273,7 +273,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
                     display: 'flex', justifyContent: 'center', alignItems: 'center',
                     fontWeight: 'bold', fontSize: '12px', marginRight: '12px', flexShrink: 0
                   }}>
-                    {alphabet}
+                    {orderLabel}
                   </div>
                 )}
                 

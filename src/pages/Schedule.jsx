@@ -734,7 +734,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                   {optimizePreview.newOrder.map((it, idx) => (
                     <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: idx < optimizePreview.newOrder.length - 1 ? '1px solid #f2f2f2' : 'none' }}>
                       <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#EA4335', color: 'white', fontSize: '11px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        {String.fromCharCode(65 + idx)}
+                        {idx + 1}
                       </div>
                       <div style={{ fontSize: '14px', color: '#333' }}>{it.name}</div>
                     </div>
