@@ -1,6 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 
+// 카테고리별 마커 색상 + 이모지. 보관함/다른 날 장소를 지도에서 한눈에 구분하기 위함.
+const categoryPin = (category) => {
+  const c = category || '';
+  if (c.includes('관광') || c.includes('명소')) return { color: '#4285F4', emoji: '📷' };
+  if (c.includes('맛집') || c.includes('식당') || c.includes('음식')) return { color: '#EA4335', emoji: '🍴' };
+  if (c.includes('카페') || c.includes('디저트')) return { color: '#F9AB00', emoji: '☕' };
+  if (c.includes('숙소') || c.includes('호텔')) return { color: '#9334E6', emoji: '🏨' };
+  return { color: '#34A853', emoji: '📍' };
+};
+
+// 카테고리 색상 물방울 핀 + 이모지를 그린 SVG data URL을 만든다.
+const buildPinSvgUrl = (color, emoji) => {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="48" viewBox="0 0 40 48">` +
+    `<path d="M20 1C10 1 2 9 2 19c0 13 18 27 18 27s18-14 18-27C38 9 30 1 20 1z" fill="${color}" stroke="#fff" stroke-width="2"/>` +
+    `<circle cx="20" cy="19" r="12" fill="#fff"/>` +
+    `<text x="20" y="24" font-size="15" text-anchor="middle">${emoji}</text>` +
+    `</svg>`;
+  return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+};
+
 const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height }) => {
   const mapRef = useRef(null);
   const [map, setMap] = useState(null);
@@ -58,7 +79,7 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
     if (!map || !window.google) return;
 
     const storageSignature = storageMarkers
-      .map(p => `${p.lat},${p.lng},${p.name || ''}`)
+      .map(p => `${p.lat},${p.lng},${p.name || ''},${p.category || ''}`)
       .join('|');
     if (storageSignature === lastStorageSignatureRef.current) return;
     lastStorageSignatureRef.current = storageSignature;
@@ -72,10 +93,16 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
     storageMarkers.forEach(place => {
       if (place.lat && place.lng) {
         const position = { lat: place.lat, lng: place.lng };
+        const { color, emoji } = categoryPin(place.category);
         const marker = new window.google.maps.Marker({
           position,
           map,
-          title: place.name
+          title: place.name,
+          icon: {
+            url: buildPinSvgUrl(color, emoji),
+            scaledSize: new window.google.maps.Size(34, 41),
+            anchor: new window.google.maps.Point(17, 41),
+          },
         });
         markersRef.current.push(marker);
         bounds.extend(position);
@@ -333,6 +360,27 @@ const Map = ({ storageMarkers = [], routeMarkers = [], onRouteCalculated, height
   return (
     <div style={{ width: '100%', height: height || '35vh', backgroundColor: '#e0e0e0', position: 'relative', overflow: 'hidden' }}>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+      {map && (
+        <div style={{
+          position: 'absolute', bottom: '8px', left: '8px', zIndex: 1,
+          background: 'rgba(255,255,255,0.92)', borderRadius: '8px',
+          padding: '6px 8px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px',
+          fontSize: '11px', color: '#444', boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+          maxWidth: '70%',
+        }}>
+          {[
+            { emoji: '📷', label: '관광명소' },
+            { emoji: '🍴', label: '맛집' },
+            { emoji: '☕', label: '카페' },
+            { emoji: '🏨', label: '숙소' },
+            { emoji: '📍', label: '기타' },
+          ].map((c) => (
+            <span key={c.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', whiteSpace: 'nowrap' }}>
+              {c.emoji}{c.label}
+            </span>
+          ))}
+        </div>
+      )}
       {!map && (
         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', padding: '20px', textAlign: 'center' }}>
           지도 로딩 중...
