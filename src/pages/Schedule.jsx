@@ -786,7 +786,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
             <div style={{ padding: '18px 20px 6px' }}>
               <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#333' }}>🔄 일정 바꾸기</div>
               <div style={{ fontSize: '13px', color: '#999', marginTop: '4px' }}>
-                <b style={{ color: 'var(--color-point)' }}>{activeFolderDays[routedDayIndex].title}</b> 일정과 통째로 바꿀 날을 선택하세요.
+                <b style={{ color: 'var(--color-point)' }}>Day {routedDayIndex + 1}</b> 일정과 통째로 바꿀 날을 선택하세요.
               </div>
             </div>
             <div style={{ overflowY: 'auto', padding: '8px 12px 4px', flex: 1 }}>
@@ -808,7 +808,8 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                     }}
                   >
                     <span style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text)' }}>
-                      Day {idx + 1} · {d.title}
+                      Day {idx + 1}
+                      {d.title && d.title !== `Day ${idx + 1}` ? ` · ${d.title}` : ''}
                     </span>
                     <span style={{ fontSize: '12px', color: 'var(--color-text-light)' }}>
                       {count}곳
