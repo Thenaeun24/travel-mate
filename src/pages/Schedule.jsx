@@ -61,6 +61,7 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
   const isMobile = useIsMobile();
   const [optimizePreview, setOptimizePreview] = useState(null); // 미리보기 데이터
   const [optimizing, setOptimizing] = useState(false);
+  const [swapPickerOpen, setSwapPickerOpen] = useState(false); // 일정 바꾸기 대상 선택
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const DEFAULT_FOLDER = {
@@ -155,6 +156,44 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
       })
     );
   }, [activeFolderId, setFolders]);
+
+  // 두 Day의 일정(items)을 서로 맞바꾼다. 제목/순서는 그대로 두고 내용만 교환.
+  const handleSwapDays = useCallback((dayIdA, dayIdB) => {
+    if (dayIdA === dayIdB) return;
+    setFolders((prev) =>
+      prev.map((folder) => {
+        if (folder.id !== activeFolderId) return folder;
+        const days = folder.days || [];
+        const dayA = days.find((d) => d.id === dayIdA);
+        const dayB = days.find((d) => d.id === dayIdB);
+        if (!dayA || !dayB) return folder;
+        return {
+          ...folder,
+          days: days.map((d) => {
+            if (d.id === dayIdA) return { ...d, items: dayB.items || [] };
+            if (d.id === dayIdB) return { ...d, items: dayA.items || [] };
+            return d;
+          }),
+        };
+      })
+    );
+  }, [activeFolderId, setFolders]);
+
+  // "🔄 일정 바꾸기" 클릭: 다른 날이 하나뿐이면 원터치로 바로 교환, 여러 날이면 선택 모달.
+  const handleSwapClick = () => {
+    const cur = activeFolderDays[routedDayIndex];
+    if (!cur) return;
+    const others = activeFolderDays.filter((d) => d.id !== cur.id);
+    if (others.length === 0) {
+      alert('바꿀 다른 날이 없어요. 먼저 Day를 추가해주세요.');
+      return;
+    }
+    if (others.length === 1) {
+      handleSwapDays(cur.id, others[0].id);
+      return;
+    }
+    setSwapPickerOpen(true);
+  };
 
   const handleAddFolder = () => {
     if (newFolderName.trim()) {
@@ -481,6 +520,13 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                     </h2>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <button
+                        onClick={handleSwapClick}
+                        title="이 날의 일정을 다른 날과 통째로 맞바꿔요"
+                        style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid var(--color-point)', background: 'white', color: 'var(--color-point)', cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                      >
+                        🔄 일정 바꾸기
+                      </button>
+                      <button
                         onClick={handleOptimizeClick}
                         disabled={optimizing}
                         style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', border: '1px solid var(--color-point)', background: 'var(--color-point)', color: 'white', cursor: optimizing ? 'wait' : 'pointer', fontWeight: 'bold', opacity: optimizing ? 0.7 : 1, whiteSpace: 'nowrap' }}
@@ -713,6 +759,71 @@ const Schedule = ({ folders, setFolders, activeFolderId, setActiveFolderId }) =>
                   이 순서로 적용
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일정 바꾸기: 대상 Day 선택 모달 (Day 3개 이상일 때) */}
+      {swapPickerOpen && activeFolderDays[routedDayIndex] && (
+        <div
+          onClick={() => setSwapPickerOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9500,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: '18px', width: '100%', maxWidth: '340px',
+              maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 12px 48px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ padding: '18px 20px 6px' }}>
+              <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#333' }}>🔄 일정 바꾸기</div>
+              <div style={{ fontSize: '13px', color: '#999', marginTop: '4px' }}>
+                <b style={{ color: 'var(--color-point)' }}>{activeFolderDays[routedDayIndex].title}</b> 일정과 통째로 바꿀 날을 선택하세요.
+              </div>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '8px 12px 4px', flex: 1 }}>
+              {activeFolderDays.map((d, idx) => {
+                if (d.id === activeFolderDays[routedDayIndex].id) return null;
+                const count = (d.items || []).length;
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => {
+                      handleSwapDays(activeFolderDays[routedDayIndex].id, d.id);
+                      setSwapPickerOpen(false);
+                    }}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '14px 16px', marginBottom: '6px',
+                      borderRadius: '12px', border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg)', cursor: 'pointer',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--color-text)' }}>
+                      Day {idx + 1} · {d.title}
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-light)' }}>
+                      {count}곳
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ padding: '10px 20px 16px', borderTop: '1px solid #f0f0f0' }}>
+              <button
+                onClick={() => setSwapPickerOpen(false)}
+                style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#666', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                취소
+              </button>
             </div>
           </div>
         </div>
