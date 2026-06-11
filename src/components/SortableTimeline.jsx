@@ -16,6 +16,30 @@ const useIsMobile = () => {
   return isMobile;
 };
 
+// ── 구글맵 "보기" 링크 ────────────────────────────────────────────────────
+// 공식 Google Maps URLs API 포맷을 쓴다. 과거에 쓰던
+// `/maps/place/?q=place_id:XXX` 형식은 구글이 공식 지원하지 않아 장소가
+// 제대로 안 뜨고 빈 검색 결과가 나오는 경우가 많다. 대신
+// `/maps/search/?api=1&query=...&query_place_id=...` 를 사용한다.
+// query 파라미터는 필수이며, place_id가 있으면 query_place_id로 정확히 핀을 찍는다.
+const buildGoogleMapsUrl = (item) => {
+  const base = 'https://www.google.com/maps/search/?api=1';
+  const hasCoords = item.lat != null && item.lng != null;
+  // query는 필수: 이름이 있으면 이름, 없으면 좌표를 넣는다.
+  const query = item.name
+    ? encodeURIComponent(item.name)
+    : hasCoords
+      ? `${item.lat},${item.lng}`
+      : '';
+  if (item.googlePlaceId) {
+    return `${base}&query=${query}&query_place_id=${item.googlePlaceId}`;
+  }
+  if (hasCoords) {
+    return `${base}&query=${item.lat},${item.lng}`;
+  }
+  return `${base}&query=${query}`;
+};
+
 const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeLegs = [], isCloneable = false, scheduledPlaceIds = [], onLongPressItem, days = [], baseCurrency = 'JPY', rateToKRW = null }) => {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [dayPickerItem, setDayPickerItem] = useState(null);
@@ -392,7 +416,7 @@ const SortableTimeline = ({ listId, items, setItems, groupName, onDelete, routeL
                   {/* Google Maps Link */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <a 
-                      href={item.googlePlaceId ? `https://www.google.com/maps/place/?q=place_id:${item.googlePlaceId}` : `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`} 
+                      href={buildGoogleMapsUrl(item)}
                       target="_blank" 
                       rel="noopener noreferrer"
                       style={{ 
