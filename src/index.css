@@ -148,6 +148,18 @@ h2 {
   color: var(--color-text);
 }
 
+/* Desktop (PC) mode: the page-container has inline overflow:hidden so the
+   Schedule split layout can manage its own internal scrolling. The Ledger page
+   has no internal scroll area of its own, so on desktop its lower content
+   (e.g. 카테고리별 예산, 예산 항목) gets clipped. Give it its own vertical
+   scroll on desktop. Mobile already scrolls via the page-container rule below. */
+@media (min-width: 769px) {
+  .ledger-page {
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
 /* Responsive: mobile vertical layout for the Schedule page */
 @media (max-width: 768px) {
   /* Let the page scroll vertically on mobile; desktop keeps overflow: hidden */

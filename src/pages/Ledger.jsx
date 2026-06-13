@@ -195,7 +195,7 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   };
 
   return (
-    <div style={s.page}>
+    <div className="ledger-page" style={s.page}>
 
       {/* Folder selector */}
       <div style={s.folderBar}>
