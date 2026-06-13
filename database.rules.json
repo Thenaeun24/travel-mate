@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "//": "여행앱 노드만 잠그고, 다른 앱들이 쓰는 노드는 아래 $other 규칙으로 그대로 열어둡니다. 이 JSON 전체를 Firebase 콘솔 > Realtime Database > 규칙 탭에 붙여넣고 '게시'하세요.",
+
+    "travel-mate-app": {
+      ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'cuucuu877@gmail.com' || root.child('allowedEmails').child(auth.token.email.replace('.', ',')).exists())",
+      ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'cuucuu877@gmail.com' || root.child('allowedEmails').child(auth.token.email.replace('.', ',')).exists())"
+    },
+
+    "allowedEmails": {
+      ".read": "auth != null && auth.token.email == 'cuucuu877@gmail.com'",
+      ".write": "auth != null && auth.token.email == 'cuucuu877@gmail.com'"
+    },
+
+    "$other": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

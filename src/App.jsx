@@ -5,6 +5,9 @@ import { db } from './firebase';
 import BottomTab from './components/BottomTab';
 import Schedule from './pages/Schedule';
 import Ledger from './pages/Ledger';
+import { AuthProvider, useAuth } from './auth/AuthContext';
+import LoginGate from './components/LoginGate';
+import UserAdmin from './components/UserAdmin';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 const FB_ROOT = 'travel-mate-app';
@@ -90,8 +93,10 @@ const loadActiveFolderIdFromLocalStorage = (folders) => {
   return folders[0]?.id;
 };
 
-// ─── App Component ────────────────────────────────────────────────────────────
-function App() {
+// ─── App data + UI (mounts only once the user is signed in & authorized) ───────
+function AppContent() {
+  const { user, isOwner, signOut } = useAuth();
+  const [showAdmin, setShowAdmin] = useState(false);
   const [folders, setLocalFolders] = useState(loadFromLocalStorage);
   const [activeFolderId, setActiveFolderId] = useState(() =>
     loadActiveFolderIdFromLocalStorage(loadFromLocalStorage())
@@ -256,18 +261,37 @@ function App() {
     <Router>
       <div className="app-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <header style={{
-          padding: '16px',
+          padding: '12px 16px',
           background: 'white',
           borderBottom: '1px solid var(--color-border)',
           display: 'flex',
-          justifyContent: 'center',
+          justifyContent: 'space-between',
           alignItems: 'center',
+          gap: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
         }}>
           <h1 style={{ fontSize: '18px', fontWeight: '900', color: 'var(--color-text)', margin: 0, letterSpacing: '-0.5px' }}>
             나만의 해외여행 메이트
           </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isOwner && (
+              <button
+                onClick={() => setShowAdmin(true)}
+                style={{ padding: '6px 12px', borderRadius: '16px', border: '1px solid var(--color-border)', background: 'var(--color-card)', color: 'var(--color-text)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                👥 사용자
+              </button>
+            )}
+            <button
+              onClick={signOut}
+              title={user?.email || ''}
+              style={{ padding: '6px 12px', borderRadius: '16px', border: '1px solid var(--color-border)', background: 'var(--color-card)', color: 'var(--color-text-light)', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              로그아웃
+            </button>
+          </div>
         </header>
+        {showAdmin && <UserAdmin onClose={() => setShowAdmin(false)} />}
         <div className="page-container" style={{ flex: 1, overflow: 'hidden' }}>
           <Routes>
             <Route path="/" element={<Navigate to="/schedule" replace />} />
@@ -298,6 +322,20 @@ function App() {
         <BottomTab />
       </div>
     </Router>
+  );
+}
+
+// ─── Root: auth provider + login gate around the actual app ───────────────────
+// AppContent (and therefore the Firebase data subscription/writes) only mounts
+// once the user is signed in AND authorized, so unauthorized sessions never
+// touch the protected node.
+function App() {
+  return (
+    <AuthProvider>
+      <LoginGate>
+        <AppContent />
+      </LoginGate>
+    </AuthProvider>
   );
 }
 
