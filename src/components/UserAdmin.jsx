@@ -17,11 +17,10 @@ export default function UserAdmin({ onClose }) {
       ref(db, 'allowedEmails'),
       (snap) => {
         const val = snap.val() || {};
-        const arr = Object.entries(val).map(([key, v]) => ({
-          key,
-          email: (v && v.email) || key.replace(/,/g, '.'),
-          addedAt: v?.addedAt,
-        }));
+        // Entries are stored as `{ sanitizedEmail: true }` (shared format with
+        // the household app's rules, which check .val() === true). Reconstruct
+        // the display email by turning the commas back into dots.
+        const arr = Object.keys(val).map((key) => ({ key, email: key.replace(/,/g, '.') }));
         arr.sort((a, b) => a.email.localeCompare(b.email));
         setList(arr);
       },
@@ -41,7 +40,9 @@ export default function UserAdmin({ onClose }) {
     }
     try {
       setBusy(true);
-      await set(ref(db, 'allowedEmails/' + sanitizeEmail(email)), { email, addedAt: Date.now() });
+      // Store `true` to match the existing allow-list format (household rules
+      // check `.val() === true`). Storing an object would break that check.
+      await set(ref(db, 'allowedEmails/' + sanitizeEmail(email)), true);
       setInput('');
     } catch (e) {
       setErr('추가 실패: ' + e.message);
