@@ -15,6 +15,8 @@ export const CURRENCIES = [
   { code: 'PHP', symbol: '₱', label: '페소', flag: '🇵🇭' },
   { code: 'AUD', symbol: 'A$', label: '호주달러', flag: '🇦🇺' },
   { code: 'NZD', symbol: 'NZ$', label: '뉴질랜드달러', flag: '🇳🇿' },
+  { code: 'NOK', symbol: 'kr', label: '노르웨이 크로네', flag: '🇳🇴' },
+  { code: 'SEK', symbol: 'kr', label: '스웨덴 크로나', flag: '🇸🇪' },
 ];
 
 export const DEFAULT_CURRENCY = 'JPY';
