@@ -7,10 +7,8 @@ const buildLedgerShareText = (folder, baseCurrency, toBase, toKRW) => {
   if (!folder) return '';
   const sym = currencySymbol(baseCurrency);
   const expenses = folder.expenses || [];
-  const allItems = [
-    ...(folder.items || []),
-    ...(folder.days || []).flatMap((d) => d.items || []),
-  ];
+  // Budget counts only items placed on days; storage is excluded (see Ledger body).
+  const allItems = (folder.days || []).flatMap((d) => d.items || []);
   const totalBudget = allItems.reduce((s, i) => s + Number(i.budget || 0), 0);
   const totalExp = expenses.reduce((s, e) => s + toBase(e.amount, e.currency), 0);
   const remaining = totalBudget - totalExp;
@@ -84,11 +82,10 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
   });
   const [showForm, setShowForm] = useState(false);
 
-  // All scheduled items (from days) with budget
-  const allItems = [
-    ...(activeFolder?.items || []),
-    ...(activeFolder?.days || []).flatMap((d) => d.items || []),
-  ];
+  // Budget is summed from items placed on days only (Day1, Day2, …).
+  // Storage (folder.items) is a candidate pool and is intentionally excluded,
+  // so the same place placed on multiple days is still counted per day.
+  const allItems = (activeFolder?.days || []).flatMap((d) => d.items || []);
   const budgetItems = allItems.filter((item) => item.budget && Number(item.budget) > 0);
 
   // ── Exchange rates (base currency → others) ───────────────────────────────
@@ -287,7 +284,9 @@ const Ledger = ({ folders, setFolders, activeFolderId, setActiveFolderId }) => {
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '14px' }}>카테고리별 예산</div>
             {Object.keys(budgetByCategory).length === 0 ? (
               <div style={{ textAlign: 'center', padding: '24px', color: 'var(--color-text-light)', fontSize: '14px' }}>
-                일정 페이지에서 장소에 예산을 입력하면 여기에 표시됩니다 💡
+                일정 페이지에서 <b>Day에 배치한 장소</b>에 예산을 입력하면 여기에 표시됩니다 💡
+                <br />
+                <span style={{ fontSize: '12px' }}>(보관함에만 있는 장소는 합산되지 않아요)</span>
               </div>
             ) : (
               Object.entries(budgetByCategory).map(([cat, amt]) => {
