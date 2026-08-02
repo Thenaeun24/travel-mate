@@ -4,19 +4,16 @@
 브라우저에서는 CORS 때문에 직접 펼칠 수 없다. 이 Worker 가 서버 쪽에서
 리다이렉트를 따라가 최종(긴) URL 을 돌려준다.
 
-## 배포
+설정 파일(`wrangler.toml`)은 레포 **루트**에 있고, 이 파일이 `worker/resolver.js`
+를 가리킨다.
 
-이미 Cloudflare 계정과 `wrangler` 로그인이 돼 있다면:
+## 배포 방법 1 — 컴퓨터 (wrangler CLI)
+
+레포 루트에서:
 
 ```bash
-cd worker
+npx wrangler login   # 처음 한 번만
 npx wrangler deploy
-```
-
-처음이라면 로그인부터:
-
-```bash
-npx wrangler login
 ```
 
 배포가 끝나면 아래 같은 주소가 출력된다:
@@ -24,6 +21,16 @@ npx wrangler login
 ```
 https://travel-mate-resolver.<계정이름>.workers.dev
 ```
+
+## 배포 방법 2 — 휴대폰 (GitHub 연결, 타이핑 없음)
+
+코드를 손으로 입력할 필요 없이, Cloudflare 대시보드에서 이 GitHub 레포를
+연결하면 루트의 `wrangler.toml` 을 읽어 자동 배포한다.
+
+1. Cloudflare 대시보드 → **Workers & Pages** → **Create**
+2. **Import a repository**(GitHub 연결) → `Thenaeun24/travel-mate` 선택
+3. 브랜치 `main`, 배포 명령은 기본값 `npx wrangler deploy` 그대로 → 저장/배포
+4. 나온 `...workers.dev` 주소를 앱 환경변수에 연결
 
 ## 앱에 연결
 

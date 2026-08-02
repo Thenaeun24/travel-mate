@@ -1,0 +1,12 @@
+name = "travel-mate-resolver"
+main = "worker/resolver.js"
+compatibility_date = "2026-08-01"
+
+# 이 워커는 구글맵 짧은 링크를 최종(긴) URL 로 펼쳐주는 리졸버다.
+# 코드는 worker/resolver.js 에 있다.
+#
+# 배포 방법 (둘 중 하나):
+#  1) 컴퓨터: 레포 루트에서  npx wrangler deploy
+#  2) 휴대폰: Cloudflare 대시보드에서 이 GitHub 레포를 연결하면 자동 배포
+#
+# 배포 후 나오는 주소를 앱 환경변수 VITE_LINK_RESOLVER_URL 에 넣으면 된다.
