@@ -193,10 +193,9 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     setSearchResults([]);
   };
 
-  // 검색어(장소 이름/주소)로 구글 Places 검색을 한다.
-  //  - autoAddTop=true  : 가장 정확한 결과 1개를 바로 추가 (링크에서 뽑은 검색어용)
-  //  - autoAddTop=false : 후보 목록을 보여주고 사용자가 고르게 함 (일반 검색용)
-  const runTextSearch = async (query, autoAddTop = false) => {
+  // 검색어(장소 이름/주소)로 구글 Places 검색을 해서 후보 목록을 보여준다.
+  // 이름/주소 검색은 1등이 엉뚱할 수 있어, 자동 추가하지 않고 사용자가 직접 고른다.
+  const runTextSearch = async (query) => {
     setIsSearching(true);
     try {
       // Use Places API (New) instead of Legacy PlacesService
@@ -208,19 +207,11 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
       });
 
       setIsSearching(false);
+      setInputValue('');
       if (places && places.length > 0) {
-        if (autoAddTop && places[0].location) {
-          addPlaceFromCoords({
-            name: places[0].displayName,
-            lat: places[0].location.lat(),
-            lng: places[0].location.lng(),
-            googlePlaceId: places[0].id,
-          });
-        } else {
-          setSearchResults(places);
-        }
+        setSearchResults(places);
       } else {
-        alert("검색 결과가 없습니다. 다른 검색어를 입력해보세요.");
+        alert("검색 결과가 없습니다. 다른 검색어를 입력하거나 구글맵의 긴 주소를 붙여넣어 주세요.");
       }
     } catch (error) {
       setIsSearching(false);
@@ -242,7 +233,7 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     if (parsed) {
       e.preventDefault();
       if (parsed.type === 'coords') addPlaceFromCoords(parsed);
-      else await runTextSearch(parsed.query, true); // 좌표 없이 이름만 → 검색해서 추가
+      else await runTextSearch(parsed.query); // 좌표 없이 이름만 → 검색 후보에서 고르기
       return;
     }
 
@@ -255,8 +246,8 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
         setIsSearching(false);
         addPlaceFromCoords(resolved);
       } else if (resolved && resolved.type === 'query') {
-        // 좌표가 없으면 링크에서 뽑은 이름/주소로 구글 검색해서 추가
-        await runTextSearch(resolved.query, true);
+        // 좌표가 없으면 링크에서 뽑은 이름/주소로 검색 → 후보에서 고르기
+        await runTextSearch(resolved.query);
       } else {
         setIsSearching(false);
         alert("링크에서 위치를 찾지 못했습니다. 구글맵의 긴 주소를 붙여넣거나 장소 이름으로 검색해주세요.");
@@ -268,7 +259,7 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     // 3) 일반 텍스트면 장소 이름으로 검색 (후보 목록 표시)
     if (e.key === 'Enter' && val.trim() !== '') {
       e.preventDefault();
-      await runTextSearch(val.trim(), false);
+      await runTextSearch(val.trim());
     }
   };
 
@@ -340,7 +331,7 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
           }}>
             <div style={{ padding: '8px 12px', background: 'var(--color-bg)', fontSize: '12px', fontWeight: 'bold', color: 'var(--color-point)' }}>
-              엔터 검색 결과 (클릭하여 추가)
+              검색 결과 — 맞는 장소를 눌러서 추가하세요
             </div>
             {searchResults.map((place, index) => {
               const isInStorage = storageItems.some(item => item.googlePlaceId === place.id);
