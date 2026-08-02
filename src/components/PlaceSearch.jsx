@@ -50,29 +50,51 @@ const parseGoogleMapsUrl = (text) => {
   return { name, lat, lng };
 };
 
-// 짧은 링크(maps.app.goo.gl 등)는 좌표가 숨겨진 리다이렉트 링크다.
-// 이 앱은 백엔드가 없는 정적 사이트라서, 무료 CORS 프록시(allorigins)를 통해
-// 원본(긴) URL 로 펼친 뒤 좌표를 뽑는다. 실패하면 null 을 반환한다.
-const resolveShortLink = async (shortUrl) => {
+// 타임아웃이 걸린 fetch (기본 10초). 시간 초과 시 abort 된다.
+const fetchWithTimeout = async (url, ms = 10000) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+// 짧은 링크(maps.app.goo.gl 등)는 좌표가 숨겨진 리다이렉트 링크다.
+// 이 앱은 백엔드가 없는 정적 사이트라서 리다이렉트를 직접 펼칠 수 없다.
+//  1순위: 자체 Cloudflare Worker (VITE_LINK_RESOLVER_URL). {finalUrl} 을 돌려준다.
+//  2순위(폴백): 공용 CORS 프록시(allorigins). Worker 미설정/실패 시에만 사용.
+// 최종 URL 에서 좌표를 뽑아 반환하고, 못 찾으면 null 을 반환한다.
+const resolveShortLink = async (shortUrl) => {
+  // 1순위: 자체 Worker
+  const workerUrl = import.meta.env.VITE_LINK_RESOLVER_URL;
+  if (workerUrl) {
+    try {
+      const res = await fetchWithTimeout(`${workerUrl}?u=${encodeURIComponent(shortUrl)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const parsed = data?.finalUrl ? parseGoogleMapsUrl(data.finalUrl) : null;
+        if (parsed) return parsed;
+      }
+    } catch {
+      // Worker 실패 시 아래 폴백으로 진행
+    }
+  }
+
+  // 2순위(폴백): 공용 CORS 프록시
   try {
     const proxy = 'https://api.allorigins.win/get?url=';
-    const res = await fetch(proxy + encodeURIComponent(shortUrl), {
-      signal: controller.signal,
-    });
+    const res = await fetchWithTimeout(proxy + encodeURIComponent(shortUrl));
     if (!res.ok) return null;
     const data = await res.json();
 
-    // 1) 리다이렉트 후 최종 URL 에서 시도
+    // 리다이렉트 후 최종 URL 에서 먼저 시도, 없으면 페이지 본문(HTML)을 스캔
     let parsed = data?.status?.url ? parseGoogleMapsUrl(data.status.url) : null;
-    // 2) 최종 페이지 본문(HTML)에도 좌표가 들어있으므로 예비로 스캔
     if (!parsed && data?.contents) parsed = parseGoogleMapsUrl(data.contents);
     return parsed;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 };
 
