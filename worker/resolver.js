@@ -39,12 +39,20 @@ export default {
     try {
       // 리다이렉트를 수동으로 따라가며 최종 URL 을 찾는다.
       // (본문 다운로드 없이 Location 헤더만 읽어 가볍고 빠르다.)
+      // 실제 모바일 브라우저처럼 보이게 해서 구글의 봇 감지(/sorry 캡차)를 최대한 피한다.
+      const browserHeaders = {
+        'User-Agent':
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
+          '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      };
       let current = target;
       let finalUrl = target;
       for (let i = 0; i < 5; i++) {
         const res = await fetch(current, {
           redirect: 'manual',
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; travel-mate-resolver)' },
+          headers: browserHeaders,
         });
         const loc = res.headers.get('location');
         if (res.status >= 300 && res.status < 400 && loc) {

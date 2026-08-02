@@ -1,53 +1,79 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 
-// 구글맵 "긴 주소"(전체 URL)에서 장소 이름과 좌표를 뽑아낸다.
-// 다양한 형태를 지원한다:
-//  - .../maps/place/이름/@위도,경도...
-//  - data=...!3d위도!4d경도  (핀의 정확한 좌표)
-//  - ?q=위도,경도 / &ll=위도,경도 / &query=위도,경도
-// 좌표를 못 찾으면 null 을 반환한다.
-const parseGoogleMapsUrl = (text) => {
-  if (!text || typeof text !== 'string') return null;
+// URL 에서 장소 이름/주소(검색어)를 뽑는다. 좌표가 없을 때 쓴다.
+//  - ?q=장소이름  (q 가 좌표가 아니라 이름/주소인 경우)
+//  - /maps/place/이름
+const extractPlaceQuery = (text) => {
+  const qMatch = text.match(/[?&]q=([^&]+)/);
+  if (qMatch) {
+    let q = qMatch[1];
+    try { q = decodeURIComponent(q.replace(/\+/g, ' ')); } catch { q = q.replace(/\+/g, ' '); }
+    q = q.trim();
+    // 좌표(위도,경도) 형태면 검색어가 아니다
+    if (q && !/^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(q)) return q;
+  }
+  const placeMatch = text.match(/\/maps\/place\/([^/@?]+)/);
+  if (placeMatch) {
+    try { return decodeURIComponent(placeMatch[1].replace(/\+/g, ' ')).trim(); }
+    catch { return placeMatch[1].replace(/\+/g, ' ').trim(); }
+  }
+  return null;
+};
+
+// 구글맵 URL(긴 주소 또는 펼쳐진 짧은 링크)에서 위치 정보를 뽑는다.
+// 반환값:
+//   { type: 'coords', name, lat, lng }  좌표를 찾은 경우
+//   { type: 'query', query }            좌표는 없지만 장소 이름/주소가 있는 경우
+//   null                                아무것도 못 찾은 경우
+// 지원 좌표 형태: /maps/place/.../@위도,경도, data=..!3d위도!4d경도, q=/ll=/query=위도,경도
+const parseGoogleMapsResult = (raw) => {
+  if (!raw || typeof raw !== 'string') return null;
+
+  // 구글이 봇으로 의심하면 /sorry(캡차)·consent 페이지로 감싼다.
+  // 진짜 주소는 continue= 파라미터 안에 있으므로 꺼내서 사용한다.
+  let text = raw;
+  if (/google\.[^/]*\/sorry/i.test(raw) || /consent\.google/i.test(raw)) {
+    const c = raw.match(/[?&]continue=([^&]+)/);
+    if (c) {
+      try { text = decodeURIComponent(c[1]); } catch { text = c[1]; }
+    }
+  }
+
+  // 1) 좌표 찾기 (핀 좌표 !3d!4d → 지도중심 @위도,경도 → q=/ll= 위도,경도)
+  const dataMatch = text.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  const atMatch = text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  const coordParam = text.match(/[?&](?:q|ll|query|destination)=(-?\d+\.\d+),(-?\d+\.\d+)/);
 
   let lat = null;
   let lng = null;
-
-  // 1) 핀의 정확한 좌표(!3d!4d)를 최우선으로 사용
-  const dataMatch = text.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-  // 2) 없으면 지도 중심 좌표(@위도,경도)
-  const atMatch = text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-  // 3) 그래도 없으면 q=/ll=/query=/destination= 파라미터
-  const paramMatch = text.match(/[?&](?:q|ll|query|destination)=(-?\d+\.\d+),(-?\d+\.\d+)/);
-
   if (dataMatch) {
     lat = parseFloat(dataMatch[1]);
     lng = parseFloat(dataMatch[2]);
   } else if (atMatch) {
     lat = parseFloat(atMatch[1]);
     lng = parseFloat(atMatch[2]);
-  } else if (paramMatch) {
-    lat = parseFloat(paramMatch[1]);
-    lng = parseFloat(paramMatch[2]);
+  } else if (coordParam) {
+    lat = parseFloat(coordParam[1]);
+    lng = parseFloat(coordParam[2]);
   }
 
-  if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
-    return null;
-  }
-
-  // 장소 이름: /maps/place/이름/ 에서 추출 (없으면 좌표로 대체)
-  let name = '';
-  const placeMatch = text.match(/\/maps\/place\/([^/@?]+)/);
-  if (placeMatch) {
-    try {
-      name = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
-    } catch {
-      name = placeMatch[1].replace(/\+/g, ' ');
+  if (lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+    let name = '';
+    const placeMatch = text.match(/\/maps\/place\/([^/@?]+)/);
+    if (placeMatch) {
+      try { name = decodeURIComponent(placeMatch[1].replace(/\+/g, ' ')); }
+      catch { name = placeMatch[1].replace(/\+/g, ' '); }
     }
+    if (!name) name = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    return { type: 'coords', name, lat, lng };
   }
-  if (!name) name = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-  return { name, lat, lng };
+  // 2) 좌표가 없으면 장소 이름/주소를 검색어로 반환 (앱이 구글 검색으로 좌표를 찾는다)
+  const query = extractPlaceQuery(text);
+  if (query) return { type: 'query', query };
+
+  return null;
 };
 
 // 타임아웃이 걸린 fetch (기본 10초). 시간 초과 시 abort 된다.
@@ -65,7 +91,7 @@ const fetchWithTimeout = async (url, ms = 10000) => {
 // 이 앱은 백엔드가 없는 정적 사이트라서 리다이렉트를 직접 펼칠 수 없다.
 //  1순위: 자체 Cloudflare Worker (VITE_LINK_RESOLVER_URL). {finalUrl} 을 돌려준다.
 //  2순위(폴백): 공용 CORS 프록시(allorigins). Worker 미설정/실패 시에만 사용.
-// 최종 URL 에서 좌표를 뽑아 반환하고, 못 찾으면 null 을 반환한다.
+// 펼친 URL 을 parseGoogleMapsResult 로 해석해 {type:'coords'|'query',...} 또는 null 을 반환한다.
 const resolveShortLink = async (shortUrl) => {
   // 1순위: 자체 Worker
   const workerUrl = import.meta.env.VITE_LINK_RESOLVER_URL;
@@ -74,7 +100,7 @@ const resolveShortLink = async (shortUrl) => {
       const res = await fetchWithTimeout(`${workerUrl}?u=${encodeURIComponent(shortUrl)}`);
       if (res.ok) {
         const data = await res.json();
-        const parsed = data?.finalUrl ? parseGoogleMapsUrl(data.finalUrl) : null;
+        const parsed = data?.finalUrl ? parseGoogleMapsResult(data.finalUrl) : null;
         if (parsed) return parsed;
       }
     } catch {
@@ -90,8 +116,8 @@ const resolveShortLink = async (shortUrl) => {
     const data = await res.json();
 
     // 리다이렉트 후 최종 URL 에서 먼저 시도, 없으면 페이지 본문(HTML)을 스캔
-    let parsed = data?.status?.url ? parseGoogleMapsUrl(data.status.url) : null;
-    if (!parsed && data?.contents) parsed = parseGoogleMapsUrl(data.contents);
+    let parsed = data?.status?.url ? parseGoogleMapsResult(data.status.url) : null;
+    if (!parsed && data?.contents) parsed = parseGoogleMapsResult(data.contents);
     return parsed;
   } catch {
     return null;
@@ -153,10 +179,10 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
   };
 
   // 좌표 정보로 장소를 추가하는 공통 함수
-  const addPlaceFromCoords = ({ name, lat, lng }) => {
+  const addPlaceFromCoords = ({ name, lat, lng, googlePlaceId = null }) => {
     const newPlace = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      googlePlaceId: null,
+      googlePlaceId,
       name,
       category: selectedCategory,
       lat,
@@ -167,6 +193,42 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     setSearchResults([]);
   };
 
+  // 검색어(장소 이름/주소)로 구글 Places 검색을 한다.
+  //  - autoAddTop=true  : 가장 정확한 결과 1개를 바로 추가 (링크에서 뽑은 검색어용)
+  //  - autoAddTop=false : 후보 목록을 보여주고 사용자가 고르게 함 (일반 검색용)
+  const runTextSearch = async (query, autoAddTop = false) => {
+    setIsSearching(true);
+    try {
+      // Use Places API (New) instead of Legacy PlacesService
+      const { Place } = await window.google.maps.importLibrary("places");
+      const { places } = await Place.searchByText({
+        textQuery: query,
+        fields: ["id", "displayName", "location", "formattedAddress"],
+        maxResultCount: 5,
+      });
+
+      setIsSearching(false);
+      if (places && places.length > 0) {
+        if (autoAddTop && places[0].location) {
+          addPlaceFromCoords({
+            name: places[0].displayName,
+            lat: places[0].location.lat(),
+            lng: places[0].location.lng(),
+            googlePlaceId: places[0].id,
+          });
+        } else {
+          setSearchResults(places);
+        }
+      } else {
+        alert("검색 결과가 없습니다. 다른 검색어를 입력해보세요.");
+      }
+    } catch (error) {
+      setIsSearching(false);
+      alert("검색 중 오류가 발생했습니다. 구글맵 API 설정을 확인해주세요.");
+      console.error("Places API Error:", error);
+    }
+  };
+
   const handlePasteOrEnter = async (e) => {
     // 붙여넣기(paste) 시점에는 input 값이 아직 갱신되지 않으므로 clipboard 에서 직접 읽는다.
     const val = e.type === 'paste'
@@ -175,58 +237,38 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
 
     if (e.type !== 'paste' && e.key !== 'Enter') return;
 
-    // 1) 긴 주소(전체 URL)이면 바로 파싱해서 추가
-    const parsed = parseGoogleMapsUrl(val);
+    // 1) 긴 주소(전체 URL)이면 바로 해석
+    const parsed = parseGoogleMapsResult(val);
     if (parsed) {
       e.preventDefault();
-      addPlaceFromCoords(parsed);
+      if (parsed.type === 'coords') addPlaceFromCoords(parsed);
+      else await runTextSearch(parsed.query, true); // 좌표 없이 이름만 → 검색해서 추가
       return;
     }
 
-    // 2) 짧은 링크 등 그 밖의 URL 이면 프록시로 펼쳐서 좌표를 뽑는다
+    // 2) 짧은 링크 등 그 밖의 URL 이면 펼쳐서 해석
     if (val.includes('http')) {
       e.preventDefault();
       setIsSearching(true);
       const resolved = await resolveShortLink(val.trim());
-      setIsSearching(false);
-      if (resolved) {
+      if (resolved && resolved.type === 'coords') {
+        setIsSearching(false);
         addPlaceFromCoords(resolved);
+      } else if (resolved && resolved.type === 'query') {
+        // 좌표가 없으면 링크에서 뽑은 이름/주소로 구글 검색해서 추가
+        await runTextSearch(resolved.query, true);
       } else {
+        setIsSearching(false);
         alert("링크에서 위치를 찾지 못했습니다. 구글맵의 긴 주소를 붙여넣거나 장소 이름으로 검색해주세요.");
         setInputValue('');
       }
       return;
     }
 
-    // 3) 일반 텍스트면 장소 이름으로 검색
-    if (e.key === 'Enter') {
-      if (val.trim() !== '') {
-        e.preventDefault();
-        setIsSearching(true);
-
-        try {
-          // Use Places API (New) instead of Legacy PlacesService
-          const { Place } = await window.google.maps.importLibrary("places");
-          const request = {
-            textQuery: val,
-            fields: ["id", "displayName", "location", "formattedAddress"],
-            maxResultCount: 5,
-          };
-          
-          const { places } = await Place.searchByText(request);
-          
-          setIsSearching(false);
-          if (places && places.length > 0) {
-            setSearchResults(places);
-          } else {
-            alert("검색 결과가 없습니다. 다른 검색어를 입력해보세요.");
-          }
-        } catch (error) {
-          setIsSearching(false);
-          alert("검색 중 오류가 발생했습니다. 구글맵 API 설정을 확인해주세요.");
-          console.error("Places API Error:", error);
-        }
-      }
+    // 3) 일반 텍스트면 장소 이름으로 검색 (후보 목록 표시)
+    if (e.key === 'Enter' && val.trim() !== '') {
+      e.preventDefault();
+      await runTextSearch(val.trim(), false);
     }
   };
 
