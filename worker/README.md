@@ -4,12 +4,12 @@
 브라우저에서는 CORS 때문에 직접 펼칠 수 없다. 이 Worker 가 서버 쪽에서
 리다이렉트를 따라가 최종(긴) URL 을 돌려준다.
 
-설정 파일(`wrangler.toml`)은 레포 **루트**에 있고, 이 파일이 `worker/resolver.js`
-를 가리킨다.
+설정 파일(`wrangler.toml`)은 이 `worker/` 폴더 안에 있다.
+(레포 루트에 두면 Cloudflare Pages 빌드가 이 파일을 잘못 해석해 실패한다.)
 
 ## 배포 방법 1 — 컴퓨터 (wrangler CLI)
 
-레포 루트에서:
+`worker/` 폴더 안에서:
 
 ```bash
 npx wrangler login   # 처음 한 번만
@@ -29,8 +29,10 @@ https://travel-mate-resolver.<계정이름>.workers.dev
 
 1. Cloudflare 대시보드 → **Workers & Pages** → **Create**
 2. **Import a repository**(GitHub 연결) → `Thenaeun24/travel-mate` 선택
-3. 브랜치 `main`, 배포 명령은 기본값 `npx wrangler deploy` 그대로 → 저장/배포
-4. 나온 `...workers.dev` 주소를 앱 환경변수에 연결
+3. 빌드 설정에서 **Root directory** 를 `worker` 로 지정
+   (설정 파일이 worker/ 안에 있기 때문)
+4. 배포 명령은 기본값 `npx wrangler deploy` 그대로 → 저장/배포
+5. 나온 `...workers.dev` 주소를 앱 환경변수에 연결
 
 ## 앱에 연결
 

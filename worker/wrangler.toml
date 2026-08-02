@@ -1,0 +1,10 @@
+name = "travel-mate"
+main = "resolver.js"
+compatibility_date = "2026-08-01"
+
+# 이 설정 파일은 워커 전용이라 worker/ 폴더 안에 둔다.
+# (레포 루트에 두면 Cloudflare Pages 빌드가 이 파일을 잘못 해석해 실패한다.)
+#
+# 컴퓨터에서 배포: worker 폴더로 들어가서  npx wrangler deploy
+# Cloudflare 대시보드의 워커 Git 빌드를 쓰는 경우엔 빌드 설정의
+# "Root directory(루트 디렉터리)" 를 worker 로 지정하면 된다.
