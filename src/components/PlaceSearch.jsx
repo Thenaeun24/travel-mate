@@ -220,6 +220,53 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     }
   };
 
+  // 링크에서 뽑은 "이름+주소" 로 위치를 찾는다.
+  //  - 이름이 건물명/호수라 이름 검색은 실패하기 쉬우므로, 주소를 좌표로 바꾸는
+  //    Geocoding 결과를 최우선 후보로 넣고, 이름 기반 Places 결과도 함께 보여준다.
+  //  - 자동 추가하지 않고 후보 목록에서 사용자가 정확한 곳을 고른다.
+  const addFromQuery = async (query) => {
+    setIsSearching(true);
+    const candidates = [];
+
+    // 1) 주소 → 정확 좌표 (Geocoder). 결과 형태를 Places 후보와 맞춰 담는다.
+    try {
+      const { Geocoder } = await window.google.maps.importLibrary("geocoding");
+      const { results } = await new Geocoder().geocode({ address: query });
+      if (results && results.length > 0) {
+        const r = results[0];
+        candidates.push({
+          displayName: query.split(',')[0].trim() || r.formatted_address,
+          formattedAddress: r.formatted_address,
+          id: r.place_id,
+          location: r.geometry.location, // .lat()/.lng() 제공 → Places 후보와 동일
+        });
+      }
+    } catch (err) {
+      console.error("Geocoder error", err);
+    }
+
+    // 2) 이름 기반 후보 (Places)
+    try {
+      const { Place } = await window.google.maps.importLibrary("places");
+      const { places } = await Place.searchByText({
+        textQuery: query,
+        fields: ["id", "displayName", "location", "formattedAddress"],
+        maxResultCount: 5,
+      });
+      if (places) candidates.push(...places);
+    } catch (err) {
+      console.error("Places API Error", err);
+    }
+
+    setIsSearching(false);
+    setInputValue('');
+    if (candidates.length > 0) {
+      setSearchResults(candidates);
+    } else {
+      alert("링크에서 위치를 찾지 못했습니다. 구글맵의 긴 주소를 붙여넣거나 장소 이름으로 검색해주세요.");
+    }
+  };
+
   const handlePasteOrEnter = async (e) => {
     // 붙여넣기(paste) 시점에는 input 값이 아직 갱신되지 않으므로 clipboard 에서 직접 읽는다.
     const val = e.type === 'paste'
@@ -233,7 +280,7 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
     if (parsed) {
       e.preventDefault();
       if (parsed.type === 'coords') addPlaceFromCoords(parsed);
-      else await runTextSearch(parsed.query); // 좌표 없이 이름만 → 검색 후보에서 고르기
+      else await addFromQuery(parsed.query); // 좌표 없이 이름/주소만 → 주소 좌표변환+검색 후보
       return;
     }
 
@@ -246,8 +293,8 @@ const PlaceSearch = ({ onAddPlace, storageItems = [] }) => {
         setIsSearching(false);
         addPlaceFromCoords(resolved);
       } else if (resolved && resolved.type === 'query') {
-        // 좌표가 없으면 링크에서 뽑은 이름/주소로 검색 → 후보에서 고르기
-        await runTextSearch(resolved.query);
+        // 좌표가 없으면 링크에서 뽑은 주소를 좌표로 변환 + 이름 검색 → 후보에서 고르기
+        await addFromQuery(resolved.query);
       } else {
         setIsSearching(false);
         alert("링크에서 위치를 찾지 못했습니다. 구글맵의 긴 주소를 붙여넣거나 장소 이름으로 검색해주세요.");
